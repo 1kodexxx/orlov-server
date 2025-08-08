@@ -1,0 +1,10 @@
+// settings.json
+{
+  "workbench.iconTheme": "material-icon-theme",
+  "material-icon-theme.showFolderIcons": true,
+  "material-icon-theme.folders.associations": {
+    "users": "admin",
+    "sections": "base"
+  },
+  "files.eol": "\n"
+}
