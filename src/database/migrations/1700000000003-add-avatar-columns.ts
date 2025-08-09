@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddAvatarColumns170000000003 implements MigrationInterface {
-  name = 'AddAvatarColumns170000000003';
+export class AddAvatarColumns1700000000003 implements MigrationInterface {
+  name = 'AddAvatarColumns1700000000003';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     // 1) колонки для аватара

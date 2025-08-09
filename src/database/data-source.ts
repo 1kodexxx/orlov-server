@@ -3,6 +3,9 @@ import 'reflect-metadata';
 import 'dotenv/config';
 import { DataSource, DataSourceOptions } from 'typeorm';
 
+// если файл запущен через ts-node — расширение .ts, после сборки — .js
+const isTs = __filename.endsWith('.ts');
+
 const options: DataSourceOptions = {
   type: 'postgres',
   host: process.env.DATABASE_HOST ?? 'localhost',
@@ -14,9 +17,16 @@ const options: DataSourceOptions = {
     (process.env.DATABASE_SSL ?? 'false') === 'true'
       ? { rejectUnauthorized: false }
       : false,
-  entities: ['dist/**/*.entity.js'],
-  migrations: ['dist/migrations/*.js'], // <-- исправил путь
+
+  // пути к сущностям/миграциям в зависимости от среды
+  entities: [isTs ? 'src/**/*.entity.ts' : 'dist/**/*.entity.js'],
+  migrations: [
+    isTs ? 'src/database/migrations/*.ts' : 'dist/database/migrations/*.js',
+  ],
   migrationsTableName: 'migrations',
+
+  // включай/отключай по вкусу
+  // logging: true,
 };
 
 export default new DataSource(options);
