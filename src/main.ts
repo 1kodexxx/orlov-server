@@ -71,12 +71,12 @@ async function bootstrap() {
 
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);
-  logger.log(`🚀 Server started on http://localhost:${port}`);
+  logger.log(`🚀 Сервер запущен на http://localhost:${port}`);
 }
 
 bootstrap().catch(() => {
   const logger = new Logger('Bootstrap');
   // не палим детали в stdout; при необходимости можно отправить в APM/логгер
-  logger.error('❌ Fatal bootstrap error');
+  logger.error('❌ Критическая ошибка запуска');
   process.exit(1);
 });
