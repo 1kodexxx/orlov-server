@@ -6,24 +6,27 @@ export class User {
   @PrimaryGeneratedColumn({ name: 'customer_id' })
   id!: number;
 
-  @Column({ name: 'first_name' })
+  @Column({ name: 'first_name', type: 'varchar', length: 100 })
   firstName!: string;
 
-  @Column({ name: 'last_name' })
+  @Column({ name: 'last_name', type: 'varchar', length: 100 })
   lastName!: string;
 
-  @Column({ unique: true })
+  @Column({ name: 'email', type: 'varchar', length: 255, unique: true })
   email!: string;
 
-  @Column({ nullable: true })
-  phone?: string;
+  // ⚠️ Явно задаём тип, чтобы union не превращался в Object
+  @Column({ name: 'phone', type: 'varchar', length: 20, nullable: true })
+  phone?: string | null;
 
-  @Column({ name: 'registered_at', type: 'timestamp' })
+  // В Postgres лучше хранить в timestamptz
+  @Column({ name: 'registered_at', type: 'timestamptz' })
   registeredAt!: Date;
 
-  @Column({ name: 'password_hash', select: false })
+  // Argon2-хэш длинный — используем text
+  @Column({ name: 'password_hash', type: 'text', select: false })
   passwordHash!: string;
 
-  @Column({ name: 'role', default: 'customer' })
+  @Column({ name: 'role', type: 'varchar', length: 20, default: 'customer' })
   role!: Role;
 }

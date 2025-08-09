@@ -1,12 +1,21 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import * as argon2 from 'argon2';
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import * as argon2 from 'argon2';
 
 import { UsersService } from '../users/users.service';
-import { User } from '../users/user.entity';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './types';
 
-type PublicUser = Pick<User, 'id' | 'email' | 'role'>;
+type PublicUser = {
+  id: number;
+  email: string;
+  role: 'admin' | 'manager' | 'customer';
+};
 
 @Injectable()
 export class AuthService {
@@ -15,36 +24,47 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
-  async register(data: {
-    email: string;
-    password: string;
-    firstName?: string;
-    lastName?: string;
-  }): Promise<{ accessToken: string; refreshToken: string; user: JwtPayload }> {
-    const existed = await this.users.findByEmail(data.email);
-    if (existed) {
-      throw new BadRequestException('Email already registered');
-    }
+  /** Регистрация нового пользователя + выпуск пары токенов. */
+  async register(dto: RegisterDto): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    user: JwtPayload;
+  }> {
+    const existed = await this.users.findByEmail(dto.email);
+    if (existed) throw new BadRequestException('Email already registered');
 
-    const passwordHash = await argon2.hash(data.password, {
+    const passwordHash = await argon2.hash(dto.password, {
       type: argon2.argon2id,
     });
-    const created = await this.users.create({ ...data, passwordHash });
 
-    // выпускаем токены на свежесозданного пользователя
-    return this.issueTokens({
+    const created = await this.users.create({
+      email: dto.email,
+      passwordHash,
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      role: 'customer',
+    });
+
+    const { accessToken, refreshToken } = await this.issueTokens({
       id: created.id,
       email: created.email,
       role: created.role,
     });
+
+    return {
+      accessToken,
+      refreshToken,
+      user: { sub: created.id, email: created.email, role: created.role },
+    };
   }
 
-  /** Возвращает публичного пользователя или null */
+  /** Валидация пары email/пароль для LocalStrategy. */
   async validateUser(
     email: string,
     password: string,
   ): Promise<PublicUser | null> {
-    const user = await this.users.findByEmail(email);
+    // Берём пользователя с явной подгрузкой passwordHash
+    const user = await this.users.findByEmailWithPassword(email);
     if (!user) return null;
 
     const ok = await argon2.verify(user.passwordHash, password);
@@ -53,30 +73,37 @@ export class AuthService {
     return { id: user.id, email: user.email, role: user.role };
   }
 
-  /** Выпускаем пару токенов для публичного пользователя */
-  async issueTokens(user: PublicUser): Promise<{
-    accessToken: string;
-    refreshToken: string;
-    user: JwtPayload;
-  }> {
+  /** Выпуск access/refresh токенов. */
+  async issueTokens(
+    user: PublicUser,
+  ): Promise<{ accessToken: string; refreshToken: string }> {
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
       role: user.role,
     };
 
-    const access = await this.jwt.signAsync(payload, {
+    const accessToken = await this.jwt.signAsync(payload, {
       algorithm: 'RS256',
       privateKey: process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n'),
       expiresIn: process.env.JWT_ACCESS_TTL ?? '15m',
     });
 
-    const refresh = await this.jwt.signAsync(payload, {
+    const refreshToken = await this.jwt.signAsync(payload, {
       algorithm: 'RS256',
       privateKey: process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n'),
       expiresIn: process.env.JWT_REFRESH_TTL ?? '7d',
     });
 
-    return { accessToken: access, refreshToken: refresh, user: payload };
+    return { accessToken, refreshToken };
+  }
+
+  /** Удобный метод для контроллера логина. */
+  async login(
+    dto: LoginDto,
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    const user = await this.validateUser(dto.email, dto.password);
+    if (!user) throw new UnauthorizedException();
+    return this.issueTokens(user);
   }
 }
