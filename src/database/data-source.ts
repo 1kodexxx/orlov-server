@@ -15,7 +15,7 @@ const options: DataSourceOptions = {
       ? { rejectUnauthorized: false }
       : false,
   entities: ['dist/**/*.entity.js'],
-  migrations: ['dist/database/migrations/*.js'],
+  migrations: ['dist/migrations/*.js'], // <-- исправил путь
   migrationsTableName: 'migrations',
 };
 

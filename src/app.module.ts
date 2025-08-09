@@ -1,13 +1,29 @@
+// app.module.ts
 import { Module, Logger } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
+
+// ⬇️ добавь это
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { join } from 'path';
 
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
+    // ⬇️ раздаём папку uploads по пути /static
+    ServeStaticModule.forRoot({
+      rootPath: join(process.cwd(), 'uploads'),
+      serveRoot: '/static',
+      serveStaticOptions: {
+        index: false,
+        // fallthrough:false — чтобы не было «Cannot GET ...», а сразу 404 отдавалось express-static
+        fallthrough: false,
+      },
+    }),
+
     UsersModule,
     AuthModule,
     ConfigModule.forRoot({ isGlobal: true }),
@@ -23,14 +39,13 @@ import { AuthModule } from './auth/auth.module';
         database: configService.get<string>('DATABASE_NAME'),
         autoLoadEntities: true,
         synchronize: false,
-        logging: true, // лог SQL-запросов
+        logging: true,
       }),
     }),
   ],
 })
 export class AppModule {
   private readonly logger = new Logger(AppModule.name);
-
   constructor(private dataSource: DataSource) {
     if (this.dataSource.isInitialized) {
       this.logger.log('✅ Подключение к базе данных установлено успешно');
