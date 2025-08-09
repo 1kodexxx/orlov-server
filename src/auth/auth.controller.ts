@@ -1,3 +1,4 @@
+// src/auth/auth.controller.ts
 import {
   Body,
   Controller,
@@ -9,21 +10,29 @@ import {
   UseGuards,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Response, Request } from 'express';
+import type { Response, Request } from 'express';
 
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { LocalAuthGuard, JwtAuthGuard, JwtRefreshGuard } from './guards';
-import { JwtPayload, isJwtPayload } from './types';
+import { JwtPayload, isJwtPayload, PublicUser } from './types';
 
-// user в запросе либо отсутствует, либо это уже JwtPayload
 type ReqWithMaybeUser = Request & { user?: JwtPayload };
+
+// Единые опции refresh-куки
+const RT_COOKIE_OPTS = {
+  httpOnly: true,
+  sameSite: 'lax' as const, // PROD: 'none'
+  secure: false, // PROD: true
+  path: '/', // важно одинаково при clearCookie
+};
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  /** Регистрация + установка refresh-куки */
   @Post('register')
   async register(
     @Body() dto: RegisterDto,
@@ -32,88 +41,92 @@ export class AuthController {
     const { accessToken, refreshToken, user } = await this.auth.register(dto);
 
     res.cookie('rt', refreshToken, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: false, // в проде: true + sameSite: 'none'
+      ...RT_COOKIE_OPTS,
       maxAge: 7 * 24 * 3600 * 1000,
     });
 
     return { accessToken, user };
   }
 
+  /** Логин (LocalStrategy кладёт JwtPayload в req.user) */
   @UseGuards(LocalAuthGuard)
   @HttpCode(200)
   @Post('login')
   async login(
-    @Body() dto: LoginDto,
+    @Body() _dto: LoginDto,
     @Req() req: ReqWithMaybeUser,
     @Res({ passthrough: true }) res: Response,
   ) {
-    // 1) Берём payload, который положила LocalStrategy
-    let pub: JwtPayload | null = isJwtPayload(req.user) ? req.user : null;
+    if (!isJwtPayload(req.user)) throw new UnauthorizedException();
 
-    // 2) Если почему-то его нет — валидируем и собираем сами
-    if (!pub) {
-      const u = await this.auth.validateUser(dto.email, dto.password);
-      if (!u) throw new UnauthorizedException();
-      pub = { sub: u.id, email: u.email, role: u.role };
-      req.user = pub; // кладём для единообразия по пайплайну
-    }
-
+    const p = req.user;
     const { accessToken, refreshToken } = await this.auth.issueTokens({
-      id: pub.sub,
-      email: pub.email,
-      role: pub.role,
-    });
+      id: p.sub,
+      email: p.email,
+      role: p.role,
+      tokenVersion: p.ver,
+    } satisfies PublicUser);
 
     res.cookie('rt', refreshToken, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: false,
+      ...RT_COOKIE_OPTS,
       maxAge: 7 * 24 * 3600 * 1000,
     });
 
-    return { accessToken, user: pub };
+    return { accessToken, user: p };
   }
 
+  /** Обновление access/refresh по refresh-куке (или Bearer) */
   @UseGuards(JwtRefreshGuard)
   @Post('refresh')
   async refresh(
     @Req() req: ReqWithMaybeUser,
     @Res({ passthrough: true }) res: Response,
   ) {
-    if (!isJwtPayload(req.user)) {
-      throw new UnauthorizedException();
-    }
-    // после guard'а тип уже JwtPayload — каст не нужен
-    const payload = req.user;
+    if (!isJwtPayload(req.user)) throw new UnauthorizedException();
 
+    const p = req.user;
     const { accessToken, refreshToken } = await this.auth.issueTokens({
-      id: payload.sub,
-      email: payload.email,
-      role: payload.role,
+      id: p.sub,
+      email: p.email,
+      role: p.role,
+      tokenVersion: p.ver,
     });
 
     res.cookie('rt', refreshToken, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: false,
+      ...RT_COOKIE_OPTS,
       maxAge: 7 * 24 * 3600 * 1000,
     });
 
-    return { accessToken, user: payload };
+    return { accessToken, user: p };
   }
 
+  /** Жёсткий выход: ++tokenVersion и очистка куки */
+  @UseGuards(JwtAuthGuard)
   @Post('logout')
   @HttpCode(200)
-  logout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie('rt');
+  async logout(
+    @Req() req: ReqWithMaybeUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (!isJwtPayload(req.user)) throw new UnauthorizedException();
+
+    await this.auth.logout(req.user.sub);
+
+    // гарантированная очистка
+    res.cookie('rt', '', {
+      ...RT_COOKIE_OPTS,
+      maxAge: 0,
+      expires: new Date(0),
+    });
     return { success: true };
   }
 
+  /** Профиль из БД (ФИО + аватар) */
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  me(@Req() req: ReqWithMaybeUser) {
-    return isJwtPayload(req.user) ? { user: req.user } : { user: null };
+  async me(@Req() req: ReqWithMaybeUser) {
+    if (!isJwtPayload(req.user)) return { user: null };
+    const profile = await this.auth.getProfile(req.user.sub);
+    return { user: profile };
   }
 }

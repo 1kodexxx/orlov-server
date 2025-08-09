@@ -1,106 +1,63 @@
 import {
-  BadRequestException,
-  Body,
   Controller,
-  Delete,
   Get,
   Patch,
-  Post,
-  Req,
-  UploadedFile,
+  Delete,
+  Param,
+  Body,
   UseGuards,
-  UseInterceptors,
+  Req,
+  ForbiddenException,
+  ParseIntPipe,
   NotFoundException,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { JwtAuthGuard } from '../auth/guards';
+import { JwtAuthGuard } from '../auth/guards'; // у тебя JwtAuthGuard в auth/guards.ts
 
-import * as multer from 'multer';
-import sharp from 'sharp';
-import * as fs from 'fs';
-import * as path from 'path';
-
-import type { Request } from 'express';
-
-interface JwtPayload {
+type Role = 'admin' | 'manager' | 'customer';
+interface JwtPayloadLike {
   sub: number;
   email: string;
-  role: string;
+  role: Role;
 }
-type AuthenticatedRequest = Request & { user: JwtPayload };
 
 @Controller('users')
+@UseGuards(JwtAuthGuard)
 export class UsersController {
   constructor(private readonly users: UsersService) {}
 
-  @UseGuards(JwtAuthGuard)
   @Get('me')
-  async getMe(@Req() req: AuthenticatedRequest) {
-    const userId = req.user.sub;
-    const user = await this.users.findById(userId);
-    if (!user) throw new NotFoundException('Пользователь не найден');
+  async me(@Req() req: Request) {
+    const payload = req.user as JwtPayloadLike;
+    const user = await this.users.findById(payload.sub);
+    if (!user) throw new NotFoundException('User not found');
     return user;
   }
 
-  @UseGuards(JwtAuthGuard)
   @Patch('me')
-  async updateMe(
-    @Req() req: AuthenticatedRequest,
-    @Body() dto: UpdateProfileDto,
-  ) {
-    return this.users.updateProfile(req.user.sub, dto);
+  async updateMe(@Req() req: Request, @Body() dto: UpdateProfileDto) {
+    const payload = req.user as JwtPayloadLike;
+    return this.users.updateProfile(payload.sub, dto);
   }
 
-  @UseGuards(JwtAuthGuard)
-  @Post('me/avatar')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: multer.memoryStorage(),
-      limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
-      fileFilter: (req, file, cb) => {
-        const ok = /image\/(png|jpe?g|webp)/i.test(file.mimetype);
-        cb(
-          ok ? null : new BadRequestException('Неподдерживаемый тип файла'),
-          ok,
-        );
-      },
-    }),
-  )
-  async uploadAvatar(
-    @Req() req: AuthenticatedRequest,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
-    if (!file?.buffer?.length) {
-      throw new BadRequestException('Файл не получен');
-    }
-
-    const userId = req.user.sub;
-
-    const outDir = path.join(process.cwd(), 'uploads', 'avatars');
-    await fs.promises.mkdir(outDir, { recursive: true });
-
-    const filename = `${userId}-${Date.now()}.webp`;
-    const outPath = path.join(outDir, filename);
-
-    // ниже локально отключаем «опасные» проверки только для вызова sharp и чейнинга
-    // — это безопасный и контролируемый участок.
-    /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
-    await sharp(file.buffer)
-      .rotate()
-      .resize(512, 512, { fit: 'cover' })
-      .webp({ quality: 80 })
-      .toFile(outPath);
-    /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
-
-    const publicUrl = `/static/avatars/${filename}`;
-    return this.users.setAvatar(userId, publicUrl);
+  @Delete('me')
+  async deleteMe(@Req() req: Request) {
+    const payload = req.user as JwtPayloadLike;
+    await this.users.deleteById(payload.sub);
+    return { success: true };
   }
 
-  @UseGuards(JwtAuthGuard)
-  @Delete('me/avatar')
-  async deleteAvatar(@Req() req: AuthenticatedRequest) {
-    return this.users.removeAvatar(req.user.sub);
+  @Delete(':id')
+  async adminDelete(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const payload = req.user as JwtPayloadLike;
+    if (payload.role !== 'admin')
+      throw new ForbiddenException('Admin role required');
+    await this.users.deleteById(id);
+    return { success: true };
   }
 }

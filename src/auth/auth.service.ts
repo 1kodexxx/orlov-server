@@ -1,3 +1,4 @@
+// src/auth/auth.service.ts
 import {
   BadRequestException,
   Injectable,
@@ -8,14 +9,7 @@ import * as argon2 from 'argon2';
 
 import { UsersService } from '../users/users.service';
 import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
-import { JwtPayload } from './types';
-
-type PublicUser = {
-  id: number;
-  email: string;
-  role: 'admin' | 'manager' | 'customer';
-};
+import { JwtPayload, PublicUser } from './types';
 
 @Injectable()
 export class AuthService {
@@ -24,7 +18,6 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
-  /** Регистрация нового пользователя + выпуск пары токенов. */
   async register(dto: RegisterDto): Promise<{
     accessToken: string;
     refreshToken: string;
@@ -37,43 +30,57 @@ export class AuthService {
       type: argon2.argon2id,
     });
 
-    const created = await this.users.create({
+    // Вставляем только реально заданные поля
+    const data: Parameters<UsersService['create']>[0] = {
       email: dto.email,
       passwordHash,
-      firstName: dto.firstName,
-      lastName: dto.lastName,
       role: 'customer',
-    });
+    };
+    if (dto.firstName !== undefined) data.firstName = dto.firstName;
+    if (dto.lastName !== undefined) data.lastName = dto.lastName;
 
-    const { accessToken, refreshToken } = await this.issueTokens({
+    const created = await this.users.create(data);
+
+    const pub: PublicUser = {
       id: created.id,
       email: created.email,
       role: created.role,
-    });
+      tokenVersion: created.tokenVersion ?? 0,
+    };
+
+    const { accessToken, refreshToken } = await this.issueTokens(pub);
 
     return {
       accessToken,
       refreshToken,
-      user: { sub: created.id, email: created.email, role: created.role },
+      user: {
+        sub: pub.id,
+        email: pub.email,
+        role: pub.role,
+        ver: pub.tokenVersion,
+      },
     };
   }
 
-  /** Валидация пары email/пароль для LocalStrategy. */
   async validateUser(
     email: string,
     password: string,
   ): Promise<PublicUser | null> {
-    // Берём пользователя с явной подгрузкой passwordHash
     const user = await this.users.findByEmailWithPassword(email);
     if (!user) return null;
 
     const ok = await argon2.verify(user.passwordHash, password);
     if (!ok) return null;
 
-    return { id: user.id, email: user.email, role: user.role };
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      tokenVersion: user.tokenVersion ?? 0,
+    };
   }
 
-  /** Выпуск access/refresh токенов. */
+  /** ВЫПУСК ТОКЕНОВ — RS256 + PRIVATE KEY */
   async issueTokens(
     user: PublicUser,
   ): Promise<{ accessToken: string; refreshToken: string }> {
@@ -81,29 +88,44 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       role: user.role,
+      ver: user.tokenVersion,
     };
+
+    const privateKey = process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    if (!privateKey) {
+      throw new Error('JWT_PRIVATE_KEY is missing');
+    }
 
     const accessToken = await this.jwt.signAsync(payload, {
       algorithm: 'RS256',
-      privateKey: process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      privateKey,
       expiresIn: process.env.JWT_ACCESS_TTL ?? '15m',
     });
 
     const refreshToken = await this.jwt.signAsync(payload, {
       algorithm: 'RS256',
-      privateKey: process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      privateKey,
       expiresIn: process.env.JWT_REFRESH_TTL ?? '7d',
     });
 
     return { accessToken, refreshToken };
   }
 
-  /** Удобный метод для контроллера логина. */
-  async login(
-    dto: LoginDto,
-  ): Promise<{ accessToken: string; refreshToken: string }> {
-    const user = await this.validateUser(dto.email, dto.password);
+  async getProfile(userId: number) {
+    const user = await this.users.findById(userId);
     if (!user) throw new UnauthorizedException();
-    return this.issueTokens(user);
+
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      firstName: user.firstName ?? null,
+      lastName: user.lastName ?? null,
+      avatarUrl: user.avatarUrl ?? null,
+    };
+  }
+
+  async logout(userId: number) {
+    await this.users.incrementTokenVersion(userId);
   }
 }

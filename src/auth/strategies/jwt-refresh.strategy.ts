@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+// src/auth/strategies/jwt-refresh.strategy.ts
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import {
   ExtractJwt,
@@ -7,12 +8,11 @@ import {
   StrategyOptions,
 } from 'passport-jwt';
 import type { Request } from 'express';
-import { JwtPayload } from './jwt-access.strategy';
+import { JwtPayload } from '../types';
+import { UsersService } from '../../users/users.service';
 
-// Явно типизируем extractor (чтобы не было any)
 const extractFromCookie: JwtFromRequestFunction = (req: Request) => {
   const cookies: unknown = (req as { cookies?: unknown }).cookies;
-
   if (
     cookies &&
     typeof cookies === 'object' &&
@@ -21,7 +21,6 @@ const extractFromCookie: JwtFromRequestFunction = (req: Request) => {
   ) {
     return (cookies as Record<string, string>).rt;
   }
-
   return null;
 };
 
@@ -30,7 +29,7 @@ export class JwtRefreshStrategy extends PassportStrategy(
   Strategy,
   'jwt-refresh',
 ) {
-  constructor() {
+  constructor(private readonly users: UsersService) {
     const opts: StrategyOptions = {
       jwtFromRequest: ExtractJwt.fromExtractors([
         extractFromCookie,
@@ -43,7 +42,12 @@ export class JwtRefreshStrategy extends PassportStrategy(
     super(opts);
   }
 
-  validate(payload: JwtPayload): JwtPayload {
+  async validate(payload: JwtPayload): Promise<JwtPayload> {
+    const user = await this.users.findById(payload.sub);
+    if (!user) throw new UnauthorizedException();
+    if ((user.tokenVersion ?? 0) !== payload.ver) {
+      throw new UnauthorizedException();
+    }
     return payload;
   }
 }

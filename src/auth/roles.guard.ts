@@ -1,17 +1,17 @@
+// src/auth/roles.guard.ts
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ROLES_KEY } from './roles.decorator';
 import type { Request } from 'express';
+import { ROLES_KEY } from './roles.decorator';
+import { ROLES, type Role } from './types';
 
-type RoleName = 'admin' | 'manager' | 'customer';
-
-// Узкая проверка: есть поле role и оно из разрешённого множества
-function hasRole(u: unknown): u is { role: RoleName } {
+// Узкий type-guard: user.role из множества ROLES
+function hasRole(u: unknown): u is { role: Role } {
   if (typeof u !== 'object' || u === null) return false;
   const o = u as Record<string, unknown>;
-  if (typeof o.role !== 'string') return false;
-  const roles = ['admin', 'manager', 'customer'] as const;
-  return roles.includes(o.role as (typeof roles)[number]);
+  return (
+    typeof o.role === 'string' && (ROLES as readonly string[]).includes(o.role)
+  );
 }
 
 @Injectable()
@@ -20,15 +20,13 @@ export class RolesGuard implements CanActivate {
 
   canActivate(ctx: ExecutionContext): boolean {
     const roles =
-      this.reflector.getAllAndOverride<RoleName[]>(ROLES_KEY, [
+      this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
         ctx.getHandler(),
         ctx.getClass(),
       ]) ?? [];
 
-    // если роли на маршруте не заданы — пропускаем
     if (roles.length === 0) return true;
 
-    // Явно типизируем Request, чтобы не было any
     const req = ctx.switchToHttp().getRequest<Request>();
     const user = req.user;
 

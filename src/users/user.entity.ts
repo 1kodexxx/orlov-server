@@ -19,7 +19,11 @@ export class User {
   @Column({ type: 'varchar', length: 20, nullable: true })
   phone!: string | null;
 
-  @Column({ name: 'registered_at', type: 'timestamptz' })
+  @Column({
+    name: 'registered_at',
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   registeredAt!: Date;
 
   @Column({ name: 'password_hash', type: 'text', select: false })
@@ -28,9 +32,9 @@ export class User {
   @Column({ type: 'varchar', length: 20, default: 'customer' })
   role!: UserRole;
 
-  @Column({ name: 'avatar_url', type: 'varchar', length: 500, nullable: true })
+  @Column({ name: 'avatar_url', type: 'varchar', nullable: true })
   avatarUrl!: string | null;
 
-  @Column({ name: 'avatar_updated_at', type: 'timestamptz', nullable: true })
-  avatarUpdatedAt!: Date | null;
+  @Column({ name: 'token_version', type: 'int', default: 0 })
+  tokenVersion!: number;
 }

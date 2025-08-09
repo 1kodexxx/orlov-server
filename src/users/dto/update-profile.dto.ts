@@ -1,4 +1,4 @@
-import { IsOptional, IsString, Length, IsPhoneNumber } from 'class-validator';
+import { IsOptional, IsString, Length } from 'class-validator';
 
 export class UpdateProfileDto {
   @IsOptional()
@@ -12,6 +12,7 @@ export class UpdateProfileDto {
   lastName?: string;
 
   @IsOptional()
-  @IsPhoneNumber('RU', { message: 'Некорректный номер телефона' })
-  phone?: string;
+  @IsString()
+  @Length(5, 20)
+  phone?: string | null;
 }
