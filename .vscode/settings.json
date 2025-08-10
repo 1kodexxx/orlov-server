@@ -3,6 +3,7 @@
   "workbench.iconTheme": "material-icon-theme",
   "material-icon-theme.showFolderIcons": true,
   "material-icon-theme.folders.associations": {
+    "comments": "messages",
     "users": "admin",
     "sections": "base"
   }
