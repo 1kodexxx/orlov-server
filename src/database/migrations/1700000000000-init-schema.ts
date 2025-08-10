@@ -1,3 +1,5 @@
+// src/database/migrations/1700000000000-init-schema.ts
+
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class InitSchema1700000000000 implements MigrationInterface {

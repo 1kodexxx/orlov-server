@@ -4,7 +4,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 
-// ⬇️ добавь это
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 

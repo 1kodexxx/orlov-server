@@ -1,3 +1,4 @@
+// src/database/migrations/1700000000004-add-token-version.ts
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class AddTokenVersion1700000000004 implements MigrationInterface {

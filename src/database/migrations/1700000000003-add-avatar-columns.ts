@@ -1,3 +1,4 @@
+// src/database/migrations/1700000000003-add-avatar-columns.ts
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class AddAvatarColumns1700000000003 implements MigrationInterface {

@@ -18,6 +18,7 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
+  /** Регистрация нового пользователя + выпуск пары токенов */
   async register(dto: RegisterDto): Promise<{
     accessToken: string;
     refreshToken: string;
@@ -30,16 +31,14 @@ export class AuthService {
       type: argon2.argon2id,
     });
 
-    // Вставляем только реально заданные поля
-    const data: Parameters<UsersService['create']>[0] = {
+    // firstName и lastName теперь ОБЯЗАТЕЛЬНЫ — сохраняем всегда
+    const created = await this.users.create({
       email: dto.email,
       passwordHash,
       role: 'customer',
-    };
-    if (dto.firstName !== undefined) data.firstName = dto.firstName;
-    if (dto.lastName !== undefined) data.lastName = dto.lastName;
-
-    const created = await this.users.create(data);
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+    });
 
     const pub: PublicUser = {
       id: created.id,
@@ -62,6 +61,7 @@ export class AuthService {
     };
   }
 
+  /** Проверка логина/пароля, возвращает публичного пользователя */
   async validateUser(
     email: string,
     password: string,
@@ -80,7 +80,7 @@ export class AuthService {
     };
   }
 
-  /** ВЫПУСК ТОКЕНОВ — RS256 + PRIVATE KEY */
+  /** Выпуск access/refresh (RS256) */
   async issueTokens(
     user: PublicUser,
   ): Promise<{ accessToken: string; refreshToken: string }> {
@@ -92,9 +92,7 @@ export class AuthService {
     };
 
     const privateKey = process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n');
-    if (!privateKey) {
-      throw new Error('JWT_PRIVATE_KEY is missing');
-    }
+    if (!privateKey) throw new Error('JWT_PRIVATE_KEY is missing');
 
     const accessToken = await this.jwt.signAsync(payload, {
       algorithm: 'RS256',
@@ -111,6 +109,7 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
+  /** Профиль текущего пользователя */
   async getProfile(userId: number) {
     const user = await this.users.findById(userId);
     if (!user) throw new UnauthorizedException();
@@ -125,6 +124,7 @@ export class AuthService {
     };
   }
 
+  /** Жёсткий logout: ++tokenVersion */
   async logout(userId: number) {
     await this.users.incrementTokenVersion(userId);
   }

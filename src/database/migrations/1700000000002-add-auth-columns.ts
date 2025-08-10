@@ -1,3 +1,4 @@
+// src/database/migrations/1700000000002-add-auth-columns.ts
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class AddAuthColumns1700000000002 implements MigrationInterface {
