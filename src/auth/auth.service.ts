@@ -87,11 +87,14 @@ export class AuthService {
     };
   }
 
-  /** Выпуск access/refresh (RS256). Access получает уникальный jti. */
+  /**
+   * Выпуск access/refresh (RS256).
+   * jti генерируем и передаём ТОЛЬКО через опцию `jwtid`, в payload его не кладём.
+   */
   async issueTokens(user: PublicUser): Promise<{
     accessToken: string;
     refreshToken: string;
-    payload: JwtPayload;
+    payload: JwtPayload; // вернём payload с jti для удобства
   }> {
     const privateKey = process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n');
     if (!privateKey) throw new Error('JWT_PRIVATE_KEY is missing');
@@ -104,13 +107,12 @@ export class AuthService {
     };
 
     const jti = randomUUID();
-    const accessPayload: JwtPayload = { ...base, jti };
 
-    const accessToken = await this.jwt.signAsync(accessPayload, {
+    const accessToken = await this.jwt.signAsync(base, {
       algorithm: 'RS256',
       privateKey,
       expiresIn: process.env.JWT_ACCESS_TTL ?? '15m',
-      jwtid: jti,
+      jwtid: jti, // <- этого достаточно: claim jti окажется в токене
     });
 
     const refreshToken = await this.jwt.signAsync(base, {
@@ -119,7 +121,8 @@ export class AuthService {
       expiresIn: process.env.JWT_REFRESH_TTL ?? '7d',
     });
 
-    return { accessToken, refreshToken, payload: accessPayload };
+    // Вернём payload с jti (удобно прокинуть дальше в контроллер)
+    return { accessToken, refreshToken, payload: { ...base, jti } };
   }
 
   /** Профиль текущего пользователя */
@@ -136,11 +139,15 @@ export class AuthService {
     };
   }
 
-  /** Жёсткий выход: ++tokenVersion (ломаем refresh) + blacklist текущего access (по jti) */
+  /**
+   * Жёсткий выход:
+   *  - ++tokenVersion (ломаем refresh)
+   *  - кладём текущий access.jti в blacklist до истечения TTL
+   */
   async logout(userId: number, currentJti?: string) {
     await this.users.incrementTokenVersion(userId);
     if (currentJti) {
-      await this.blacklist.add(currentJti, this.accessTtlSec);
+      this.blacklist.add(currentJti, this.accessTtlSec); // sync
     }
   }
 }
