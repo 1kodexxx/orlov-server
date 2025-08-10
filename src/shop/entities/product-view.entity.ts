@@ -1,3 +1,4 @@
+// src/shop/entities/product-like.entity.ts
 import {
   Column,
   CreateDateColumn,
@@ -8,7 +9,7 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Product } from './product.entity';
-import { User } from '../../users/entities/user.entity';
+import { User } from '../../users/users.entity';
 
 @Entity({ name: 'product_view' })
 export class ProductView {

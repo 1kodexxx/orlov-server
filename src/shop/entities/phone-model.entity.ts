@@ -1,3 +1,4 @@
+// src/shop/entities/phone-model.entity.ts
 import {
   Column,
   Entity,

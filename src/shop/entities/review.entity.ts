@@ -1,3 +1,4 @@
+// src/shop/entities/review.entity.ts
 import {
   Column,
   CreateDateColumn,
@@ -9,7 +10,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Product } from './product.entity';
-import { User } from '../../users/entities/user.entity';
+import { User } from '../../users/users.entity';
 
 @Entity({ name: 'review' })
 @Index(['product', 'customer'], { unique: true })

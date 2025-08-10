@@ -1,3 +1,4 @@
+// src/shop/shop.controller.ts
 import {
   Controller,
   Get,

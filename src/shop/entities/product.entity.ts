@@ -1,3 +1,4 @@
+// src/shop/entities/product.entity.ts
 import {
   Column,
   Entity,
@@ -46,7 +47,10 @@ export class Product {
   @Column({ name: 'currency', type: 'varchar', length: 3, default: 'RUB' })
   currency!: string;
 
-  @ManyToOne(() => PhoneModel, (m) => m.products, { nullable: true })
+  // ✅ важная правка — типизируем m: PhoneModel
+  @ManyToOne(() => PhoneModel, (m: PhoneModel) => m.products, {
+    nullable: true,
+  })
   @JoinColumn({ name: 'model_id' })
   phoneModel!: PhoneModel | null;
 

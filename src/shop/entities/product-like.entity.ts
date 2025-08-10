@@ -1,6 +1,7 @@
+// src/shop/entities/product-like.entity.ts
 import { Entity, JoinColumn, ManyToOne, PrimaryColumn } from 'typeorm';
 import { Product } from './product.entity';
-import { User } from '../../users/entities/user.entity';
+import { User } from '../../users/users.entity';
 
 @Entity({ name: 'product_like' })
 export class ProductLike {

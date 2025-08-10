@@ -1,4 +1,5 @@
-import { Transform } from 'class-transformer';
+// src/shop/dto/query-shop.dto.ts
+import { Transform, TransformFnParams } from 'class-transformer';
 import {
   IsIn,
   IsInt,
@@ -10,15 +11,17 @@ import {
   Min,
 } from 'class-validator';
 
-const toInt = ({ value }: { value: any }) =>
-  value === undefined || value === null || value === ''
-    ? undefined
-    : parseInt(value, 10);
+const toInt = ({ value }: TransformFnParams): number | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const n = Number.parseInt(String(value), 10);
+  return Number.isNaN(n) ? undefined : n;
+};
 
-const toFloat = ({ value }: { value: any }) =>
-  value === undefined || value === null || value === ''
-    ? undefined
-    : parseFloat(value);
+const toFloat = ({ value }: TransformFnParams): number | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const n = Number.parseFloat(String(value));
+  return Number.isNaN(n) ? undefined : n;
+};
 
 export type SortKey = 'price' | 'rating' | 'popular' | 'new';
 export type SortInput = `${'' | '-'}${SortKey}`;
@@ -55,12 +58,12 @@ export class QueryShopDto {
 
   @IsOptional()
   @Transform(toFloat)
-  @IsNumber()
+  @IsNumber({ allowInfinity: false, allowNaN: false })
   priceMin?: number;
 
   @IsOptional()
   @Transform(toFloat)
-  @IsNumber()
+  @IsNumber({ allowInfinity: false, allowNaN: false })
   priceMax?: number;
 
   @IsOptional()

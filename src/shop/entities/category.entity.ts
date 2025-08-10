@@ -1,3 +1,4 @@
+// src/shop/entities/category.entity.ts
 import {
   Column,
   Entity,
