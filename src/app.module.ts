@@ -1,4 +1,4 @@
-// app.module.ts
+// src/app.module.ts
 import { Module, Logger } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
