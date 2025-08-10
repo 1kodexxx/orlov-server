@@ -10,6 +10,7 @@ import { join } from 'path';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { ViewsModule } from './views/views.module';
+import { ShopModule } from './shop/shop.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { ViewsModule } from './views/views.module';
     }),
     ViewsModule,
     UsersModule,
+    ShopModule,
     AuthModule,
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRootAsync({
