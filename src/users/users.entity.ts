@@ -1,3 +1,4 @@
+// src/users/users.entity.ts
 import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 export type UserRole = 'admin' | 'manager' | 'customer';

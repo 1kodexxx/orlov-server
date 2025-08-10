@@ -16,7 +16,6 @@ export class UpdateProfileDto {
   @Length(5, 20)
   phone?: string | null;
 
-  // 👇 добавь это поле
   @IsOptional()
   @IsString()
   @MaxLength(500)
