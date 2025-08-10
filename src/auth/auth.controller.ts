@@ -15,40 +15,40 @@ import type { Response, Request } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { LocalAuthGuard, JwtAuthGuard, JwtRefreshGuard } from './guards';
+import {
+  LocalAuthGuard,
+  JwtAuthGuard,
+  JwtRefreshGuard,
+  RefreshOriginGuard,
+} from './guards/index';
 import { JwtPayload, isJwtPayload, PublicUser } from './types';
 
 type ReqWithMaybeUser = Request & { user?: JwtPayload };
 
-// Единые опции refresh-куки
 const RT_COOKIE_OPTS = {
   httpOnly: true,
   sameSite: 'lax' as const, // PROD: 'none'
   secure: false, // PROD: true
-  path: '/', // важно одинаково при clearCookie
+  path: '/',
 };
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
-  /** Регистрация + установка refresh-куки */
   @Post('register')
   async register(
     @Body() dto: RegisterDto,
     @Res({ passthrough: true }) res: Response,
   ) {
     const { accessToken, refreshToken, user } = await this.auth.register(dto);
-
     res.cookie('rt', refreshToken, {
       ...RT_COOKIE_OPTS,
       maxAge: 7 * 24 * 3600 * 1000,
     });
-
     return { accessToken, user };
   }
 
-  /** Логин (LocalStrategy кладёт JwtPayload в req.user) */
   @UseGuards(LocalAuthGuard)
   @HttpCode(200)
   @Post('login')
@@ -71,12 +71,10 @@ export class AuthController {
       ...RT_COOKIE_OPTS,
       maxAge: 7 * 24 * 3600 * 1000,
     });
-
     return { accessToken, user: p };
   }
 
-  /** Обновление access/refresh по refresh-куке (или Bearer) */
-  @UseGuards(JwtRefreshGuard)
+  @UseGuards(JwtRefreshGuard, RefreshOriginGuard)
   @Post('refresh')
   async refresh(
     @Req() req: ReqWithMaybeUser,
@@ -96,11 +94,9 @@ export class AuthController {
       ...RT_COOKIE_OPTS,
       maxAge: 7 * 24 * 3600 * 1000,
     });
-
     return { accessToken, user: p };
   }
 
-  /** Жёсткий выход: ++tokenVersion и очистка куки */
   @UseGuards(JwtAuthGuard)
   @Post('logout')
   @HttpCode(200)
@@ -109,10 +105,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     if (!isJwtPayload(req.user)) throw new UnauthorizedException();
-
-    await this.auth.logout(req.user.sub);
-
-    // гарантированная очистка
+    await this.auth.logout(req.user.sub, req.user.jti);
     res.cookie('rt', '', {
       ...RT_COOKIE_OPTS,
       maxAge: 0,
@@ -121,7 +114,6 @@ export class AuthController {
     return { success: true };
   }
 
-  /** Профиль из БД (ФИО + аватар) */
   @UseGuards(JwtAuthGuard)
   @Get('me')
   async me(@Req() req: ReqWithMaybeUser) {

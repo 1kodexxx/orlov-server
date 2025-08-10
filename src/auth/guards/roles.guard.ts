@@ -1,11 +1,10 @@
-// src/auth/roles.guard.ts
+// src/auth/guards/roles.guard.ts
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
-import { ROLES_KEY } from './roles.decorator';
-import { ROLES, type Role } from './types';
+import { ROLES_KEY } from '../decorators/roles.decorator';
+import { ROLES, type Role } from '../types';
 
-// Узкий type-guard: user.role из множества ROLES
 function hasRole(u: unknown): u is { role: Role } {
   if (typeof u !== 'object' || u === null) return false;
   const o = u as Record<string, unknown>;
@@ -28,9 +27,8 @@ export class RolesGuard implements CanActivate {
     if (roles.length === 0) return true;
 
     const req = ctx.switchToHttp().getRequest<Request>();
-    const user = req.user;
+    if (!hasRole(req.user)) return false;
 
-    if (!hasRole(user)) return false;
-    return roles.includes(user.role);
+    return roles.includes(req.user.role);
   }
 }

@@ -6,16 +6,34 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
+import { randomUUID } from 'node:crypto';
 
 import { UsersService } from '../users/users.service';
 import { RegisterDto } from './dto/register.dto';
 import { JwtPayload, PublicUser } from './types';
+import { BlacklistService } from '../common/blacklist/blacklist.service';
+
+function parseTtlSeconds(v: string | undefined, fallback: number): number {
+  if (!v) return fallback;
+  const m = /^(\d+)([smhd])?$/.exec(v.trim());
+  if (!m) return fallback;
+  const n = Number(m[1]);
+  const u = m[2] ?? 's';
+  const mult = u === 's' ? 1 : u === 'm' ? 60 : u === 'h' ? 3600 : 86400;
+  return n * mult;
+}
 
 @Injectable()
 export class AuthService {
+  private readonly accessTtlSec = parseTtlSeconds(
+    process.env.JWT_ACCESS_TTL,
+    15 * 60,
+  );
+
   constructor(
     private readonly users: UsersService,
     private readonly jwt: JwtService,
+    private readonly blacklist: BlacklistService,
   ) {}
 
   /** Регистрация нового пользователя + выпуск пары токенов */
@@ -31,7 +49,6 @@ export class AuthService {
       type: argon2.argon2id,
     });
 
-    // firstName и lastName теперь ОБЯЗАТЕЛЬНЫ — сохраняем всегда
     const created = await this.users.create({
       email: dto.email,
       passwordHash,
@@ -47,18 +64,8 @@ export class AuthService {
       tokenVersion: created.tokenVersion ?? 0,
     };
 
-    const { accessToken, refreshToken } = await this.issueTokens(pub);
-
-    return {
-      accessToken,
-      refreshToken,
-      user: {
-        sub: pub.id,
-        email: pub.email,
-        role: pub.role,
-        ver: pub.tokenVersion,
-      },
-    };
+    const { accessToken, refreshToken, payload } = await this.issueTokens(pub);
+    return { accessToken, refreshToken, user: payload };
   }
 
   /** Проверка логина/пароля, возвращает публичного пользователя */
@@ -80,40 +87,45 @@ export class AuthService {
     };
   }
 
-  /** Выпуск access/refresh (RS256) */
-  async issueTokens(
-    user: PublicUser,
-  ): Promise<{ accessToken: string; refreshToken: string }> {
-    const payload: JwtPayload = {
+  /** Выпуск access/refresh (RS256). Access получает уникальный jti. */
+  async issueTokens(user: PublicUser): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    payload: JwtPayload;
+  }> {
+    const privateKey = process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    if (!privateKey) throw new Error('JWT_PRIVATE_KEY is missing');
+
+    const base: JwtPayload = {
       sub: user.id,
       email: user.email,
       role: user.role,
       ver: user.tokenVersion,
     };
 
-    const privateKey = process.env.JWT_PRIVATE_KEY?.replace(/\\n/g, '\n');
-    if (!privateKey) throw new Error('JWT_PRIVATE_KEY is missing');
+    const jti = randomUUID();
+    const accessPayload: JwtPayload = { ...base, jti };
 
-    const accessToken = await this.jwt.signAsync(payload, {
+    const accessToken = await this.jwt.signAsync(accessPayload, {
       algorithm: 'RS256',
       privateKey,
       expiresIn: process.env.JWT_ACCESS_TTL ?? '15m',
+      jwtid: jti,
     });
 
-    const refreshToken = await this.jwt.signAsync(payload, {
+    const refreshToken = await this.jwt.signAsync(base, {
       algorithm: 'RS256',
       privateKey,
       expiresIn: process.env.JWT_REFRESH_TTL ?? '7d',
     });
 
-    return { accessToken, refreshToken };
+    return { accessToken, refreshToken, payload: accessPayload };
   }
 
   /** Профиль текущего пользователя */
   async getProfile(userId: number) {
     const user = await this.users.findById(userId);
     if (!user) throw new UnauthorizedException();
-
     return {
       id: user.id,
       email: user.email,
@@ -124,8 +136,11 @@ export class AuthService {
     };
   }
 
-  /** Жёсткий logout: ++tokenVersion */
-  async logout(userId: number) {
+  /** Жёсткий выход: ++tokenVersion (ломаем refresh) + blacklist текущего access (по jti) */
+  async logout(userId: number, currentJti?: string) {
     await this.users.incrementTokenVersion(userId);
+    if (currentJti) {
+      await this.blacklist.add(currentJti, this.accessTtlSec);
+    }
   }
 }

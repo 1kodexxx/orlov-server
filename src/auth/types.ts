@@ -1,31 +1,27 @@
 // src/auth/types.ts
-
-/** Роли пользователя */
 export const ROLES = ['admin', 'manager', 'customer'] as const;
 export type Role = (typeof ROLES)[number];
 
-/** Публичный пользователь (минимальный набор) */
 export type AuthUser = {
   id: number;
   email: string;
   role: Role;
 };
 
-/** Пользователь с версией токенов (для выпуска JWT) */
 export type PublicUser = AuthUser & {
   tokenVersion: number;
 };
 
-/** Пейлоад, который кладём в JWT */
+/** Пейлоад JWT */
 export type JwtPayload = {
   sub: number;
   email: string;
   role: Role;
-  /** Версия токенов пользователя для немедленной инвалидизации */
-  ver: number;
+  ver: number; // версия токенов
+  jti?: string; // id access-токена (для blacklist)
+  exp?: number; // unix seconds (passport-jwt добавляет)
 };
 
-/** Узкие type-guards */
 export function isRole(v: unknown): v is Role {
   return typeof v === 'string' && (ROLES as readonly string[]).includes(v);
 }

@@ -8,7 +8,9 @@ import { AuthController } from './auth.controller';
 import { LocalStrategy } from './strategies/local.strategy';
 import { JwtAccessStrategy } from './strategies/jwt-access.strategy';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
-import { RolesGuard } from './roles.guard';
+import { RolesGuard } from './guards/roles.guard';
+import { RefreshOriginGuard } from './guards/origin.guard';
+import { BlacklistService } from '../common/blacklist/blacklist.service';
 
 @Module({
   imports: [UsersModule, PassportModule, JwtModule.register({})],
@@ -19,6 +21,8 @@ import { RolesGuard } from './roles.guard';
     JwtAccessStrategy,
     JwtRefreshStrategy,
     RolesGuard,
+    RefreshOriginGuard,
+    BlacklistService,
   ],
   exports: [AuthService],
 })
