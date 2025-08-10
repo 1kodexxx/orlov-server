@@ -9,23 +9,19 @@ import {
 import { Product } from './product.entity';
 
 @Entity({ name: 'phone_model' })
+@Index(['brand', 'modelName'])
 export class PhoneModel {
-  @PrimaryGeneratedColumn({ name: 'phone_model_id' })
+  @PrimaryGeneratedColumn({ name: 'model_id' })
   id!: number;
 
   @Column({ name: 'brand', type: 'varchar', length: 100 })
-  @Index()
   brand!: string;
 
-  @Column({ name: 'model', type: 'varchar', length: 100 })
-  @Index()
-  model!: string;
+  @Column({ name: 'model_name', type: 'varchar', length: 100 })
+  modelName!: string;
 
-  @Column({ name: 'slug', type: 'varchar', length: 150, unique: true })
-  slug!: string;
-
-  @Column({ name: 'created_at', type: 'timestamptz', default: () => 'now()' })
-  createdAt!: Date;
+  @Column({ name: 'release_year', type: 'int', nullable: true })
+  releaseYear!: number | null;
 
   @OneToMany(() => Product, (p) => p.phoneModel)
   products!: Product[];

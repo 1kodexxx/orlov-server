@@ -35,15 +35,16 @@ export class ShopService {
     const qb = this.baseQB();
 
     if (dto.q) {
-      qb.andWhere('(p.title ILIKE :q OR p.description ILIKE :q)', {
+      qb.andWhere('(p.name ILIKE :q OR p.description ILIKE :q)', {
         q: `%${dto.q}%`,
       });
     }
     if (dto.categoryId) {
-      qb.andWhere('c.category_id = :cid', { cid: dto.categoryId });
+      // используем поле entity
+      qb.andWhere('c.id = :cid', { cid: dto.categoryId });
     }
     if (dto.modelId) {
-      qb.andWhere('m.phone_model_id = :mid', { mid: dto.modelId });
+      qb.andWhere('m.id = :mid', { mid: dto.modelId });
     }
     if (dto.priceMin !== undefined) {
       qb.andWhere('p.price >= :pmin', { pmin: dto.priceMin });
@@ -61,23 +62,23 @@ export class ShopService {
         qb.orderBy('p.price', 'DESC');
         break;
       case 'rating':
-        qb.orderBy('p.avg_rating', 'ASC');
+        qb.orderBy('p.avgRating', 'ASC');
         break;
       case '-rating':
-        qb.orderBy('p.avg_rating', 'DESC');
+        qb.orderBy('p.avgRating', 'DESC');
         break;
       case 'popular':
-        qb.orderBy('p.view_count', 'ASC');
+        qb.orderBy('p.viewCount', 'ASC');
         break;
       case '-popular':
-        qb.orderBy('p.view_count', 'DESC');
+        qb.orderBy('p.viewCount', 'DESC');
         break;
       case 'new':
-        qb.orderBy('p.created_at', 'ASC');
+        qb.orderBy('p.createdAt', 'ASC');
         break;
       case '-new':
       default:
-        qb.orderBy('p.created_at', 'DESC');
+        qb.orderBy('p.createdAt', 'DESC');
         break;
     }
 
@@ -88,9 +89,7 @@ export class ShopService {
   }
 
   async findOne(id: number): Promise<Product> {
-    const product = await this.baseQB()
-      .where('p.product_id = :id', { id })
-      .getOne();
+    const product = await this.baseQB().where('p.id = :id', { id }).getOne();
     if (!product) throw new NotFoundException('Product not found');
     return product;
   }
@@ -101,7 +100,6 @@ export class ShopService {
     let userRating: number | null = null;
 
     if (userId) {
-      // типобезопасно проверяем наличие лайка
       const likedRow = await this.products.manager
         .createQueryBuilder()
         .select('COUNT(1)::int', 'cnt')
@@ -111,7 +109,6 @@ export class ShopService {
           uid: userId,
         })
         .getRawOne<{ cnt: number }>();
-
       liked = (likedRow?.cnt ?? 0) > 0;
 
       const reviewRow = await this.products.manager
@@ -123,7 +120,6 @@ export class ShopService {
           uid: userId,
         })
         .getRawOne<{ rating: number }>();
-
       userRating = reviewRow?.rating ?? null;
     }
 
@@ -135,6 +131,7 @@ export class ShopService {
   }
 
   async getPhoneModels(): Promise<PhoneModel[]> {
-    return this.models.find({ order: { brand: 'ASC', model: 'ASC' } });
+    // поле называется modelName в entity (маппится на model_name)
+    return this.models.find({ order: { brand: 'ASC', modelName: 'ASC' } });
   }
 }

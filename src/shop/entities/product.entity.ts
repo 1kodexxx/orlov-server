@@ -21,16 +21,16 @@ const numericTransformer = {
 };
 
 @Entity({ name: 'product' })
-@Index(['title', 'slug'])
+@Index(['name', 'slug'])
 export class Product {
   @PrimaryGeneratedColumn({ name: 'product_id' })
   id!: number;
 
-  @Column({ name: 'title', type: 'varchar', length: 255 })
-  title!: string;
+  @Column({ name: 'sku', type: 'varchar', length: 50, unique: true })
+  slug!: string; // фронту удобнее как slug
 
-  @Column({ name: 'slug', type: 'varchar', length: 255, unique: true })
-  slug!: string;
+  @Column({ name: 'name', type: 'varchar', length: 200 })
+  name!: string;
 
   @Column({ name: 'description', type: 'text', nullable: true })
   description!: string | null;
@@ -44,15 +44,14 @@ export class Product {
   })
   price!: number;
 
-  @Column({ name: 'currency', type: 'varchar', length: 3, default: 'RUB' })
-  currency!: string;
+  @Column({ name: 'stock_quantity', type: 'int' })
+  stockQuantity!: number;
 
-  // ✅ важная правка — типизируем m: PhoneModel
   @ManyToOne(() => PhoneModel, (m: PhoneModel) => m.products, {
-    nullable: true,
+    nullable: false,
   })
-  @JoinColumn({ name: 'model_id' })
-  phoneModel!: PhoneModel | null;
+  @JoinColumn({ name: 'phone_model_id' }) // FK → phone_model(model_id)
+  phoneModel!: PhoneModel;
 
   @ManyToMany(() => Category, { cascade: false })
   @JoinTable({
@@ -62,10 +61,10 @@ export class Product {
   })
   categories!: Category[];
 
-  @Column({ name: 'view_count', type: 'integer', default: 0 })
+  @Column({ name: 'view_count', type: 'bigint', default: () => '0' })
   viewCount!: number;
 
-  @Column({ name: 'like_count', type: 'integer', default: 0 })
+  @Column({ name: 'like_count', type: 'int', default: () => '0' })
   likeCount!: number;
 
   @Column({
@@ -73,14 +72,25 @@ export class Product {
     type: 'numeric',
     precision: 3,
     scale: 2,
-    default: 0,
+    default: () => '0.00',
     transformer: numericTransformer,
   })
   avgRating!: number;
 
-  @Column({ name: 'created_at', type: 'timestamptz', default: () => 'now()' })
+  // Если в БД есть эти колонки — оставляем; если нет, можно удалить.
+  @Column({
+    name: 'created_at',
+    type: 'timestamptz',
+    default: () => 'now()',
+    nullable: true,
+  })
   createdAt!: Date;
 
-  @Column({ name: 'updated_at', type: 'timestamptz', default: () => 'now()' })
+  @Column({
+    name: 'updated_at',
+    type: 'timestamptz',
+    default: () => 'now()',
+    nullable: true,
+  })
   updatedAt!: Date;
 }
