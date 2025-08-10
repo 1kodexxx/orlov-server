@@ -34,18 +34,23 @@ export class ShopService {
     const limit = dto.limit ?? 20;
     const qb = this.baseQB();
 
-    if (dto.q)
+    if (dto.q) {
       qb.andWhere('(p.title ILIKE :q OR p.description ILIKE :q)', {
         q: `%${dto.q}%`,
       });
-    if (dto.categoryId)
+    }
+    if (dto.categoryId) {
       qb.andWhere('c.category_id = :cid', { cid: dto.categoryId });
-    if (dto.modelId)
+    }
+    if (dto.modelId) {
       qb.andWhere('m.phone_model_id = :mid', { mid: dto.modelId });
-    if (dto.priceMin !== undefined)
+    }
+    if (dto.priceMin !== undefined) {
       qb.andWhere('p.price >= :pmin', { pmin: dto.priceMin });
-    if (dto.priceMax !== undefined)
+    }
+    if (dto.priceMax !== undefined) {
       qb.andWhere('p.price <= :pmax', { pmax: dto.priceMax });
+    }
 
     const sort = dto.sort ?? 'new';
     switch (sort) {
@@ -96,16 +101,18 @@ export class ShopService {
     let userRating: number | null = null;
 
     if (userId) {
+      // типобезопасно проверяем наличие лайка
       const likedRow = await this.products.manager
         .createQueryBuilder()
-        .select('1')
+        .select('COUNT(1)::int', 'cnt')
         .from('product_like', 'pl')
         .where('pl.product_id = :id AND pl.customer_id = :uid', {
           id,
           uid: userId,
         })
-        .getRawOne();
-      liked = !!likedRow;
+        .getRawOne<{ cnt: number }>();
+
+      liked = (likedRow?.cnt ?? 0) > 0;
 
       const reviewRow = await this.products.manager
         .createQueryBuilder()
@@ -116,6 +123,7 @@ export class ShopService {
           uid: userId,
         })
         .getRawOne<{ rating: number }>();
+
       userRating = reviewRow?.rating ?? null;
     }
 
@@ -125,6 +133,7 @@ export class ShopService {
   async getCategories(): Promise<Category[]> {
     return this.categories.find({ order: { name: 'ASC' } });
   }
+
   async getPhoneModels(): Promise<PhoneModel[]> {
     return this.models.find({ order: { brand: 'ASC', model: 'ASC' } });
   }

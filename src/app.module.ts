@@ -9,6 +9,7 @@ import { join } from 'path';
 
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
+import { ViewsModule } from './views/views.module';
 
 @Module({
   imports: [
@@ -22,7 +23,7 @@ import { AuthModule } from './auth/auth.module';
         fallthrough: false,
       },
     }),
-
+    ViewsModule,
     UsersModule,
     AuthModule,
     ConfigModule.forRoot({ isGlobal: true }),

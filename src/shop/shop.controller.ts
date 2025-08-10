@@ -1,4 +1,3 @@
-// src/shop/shop.controller.ts
 import {
   Controller,
   Get,
@@ -7,6 +6,7 @@ import {
   Req,
   UseInterceptors,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { ShopService } from './shop.service';
 import { GetShopParamsDto, QueryShopDto } from './dto/query-shop.dto';
 import { IncrementProductViewInterceptor } from '../views/increment-product-view.interceptor';
@@ -27,8 +27,8 @@ export class ShopController {
 
   @UseInterceptors(IncrementProductViewInterceptor)
   @Get(':id')
-  async byId(@Param() params: GetShopParamsDto, @Req() req: any) {
-    const uid = req?.user?.sub as number | undefined;
+  async byId(@Param() params: GetShopParamsDto, @Req() req: Request) {
+    const uid = req.user?.sub;
     return this.shop.findOneWithUser(params.id, uid);
   }
 
