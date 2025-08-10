@@ -1,5 +1,9 @@
 // src/users/users.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, FindOptionsSelect } from 'typeorm';
 import { User } from './users.entity';
@@ -8,6 +12,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import sharp from 'sharp';
+import * as argon2 from 'argon2';
 
 @Injectable()
 export class UsersService {
@@ -60,6 +65,36 @@ export class UsersService {
     await this.repo.increment({ id: userId }, 'tokenVersion', 1);
   }
 
+  async changePassword(
+    userId: number,
+    current: string,
+    next: string,
+  ): Promise<void> {
+    if (current === next) {
+      throw new BadRequestException(
+        'New password must be different from current password',
+      );
+    }
+
+    const user = await this.repo.findOne({
+      where: { id: userId },
+      select: {
+        id: true,
+        passwordHash: true,
+        tokenVersion: true,
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const ok = await argon2.verify(user.passwordHash, current);
+    if (!ok) throw new BadRequestException('Current password is incorrect');
+
+    const newHash = await argon2.hash(next, { type: argon2.argon2id });
+    await this.repo.update({ id: userId }, { passwordHash: newHash });
+
+    await this.repo.increment({ id: userId }, 'tokenVersion', 1);
+  }
+
   async deleteById(id: number): Promise<void> {
     const user = await this.repo.findOne({ where: { id } });
     if (user?.avatarUrl?.startsWith('/static/avatars/')) {
@@ -99,7 +134,6 @@ export class UsersService {
         .webp({ quality: 85 })
         .toFile(finalFsPath);
     } finally {
-      // удаляем исходник в любом случае
       await safeUnlink(tempPath);
     }
 
@@ -118,12 +152,10 @@ export class UsersService {
   }
 }
 
-/** Type guard для NodeJS.ErrnoException */
 function isErrnoException(e: unknown): e is NodeJS.ErrnoException {
   return typeof e === 'object' && e !== null && 'code' in e;
 }
 
-/** Безопасное удаление файла: игнорируем ENOENT, остальное пробрасываем */
 async function safeUnlink(p?: string | null) {
   if (!p) return;
   try {

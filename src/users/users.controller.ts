@@ -18,7 +18,8 @@ import {
 import { Request } from 'express';
 import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { JwtAuthGuard } from '../auth/guards'; // у тебя JwtAuthGuard в auth/guards.ts
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { JwtAuthGuard } from '../auth/guards';
 
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -53,6 +54,17 @@ export class UsersController {
   async updateMe(@Req() req: Request, @Body() dto: UpdateProfileDto) {
     const payload = req.user as JwtPayloadLike;
     return this.users.updateProfile(payload.sub, dto);
+  }
+
+  @Patch('me/password')
+  async changeMyPassword(@Req() req: Request, @Body() dto: ChangePasswordDto) {
+    const payload = req.user as JwtPayloadLike;
+    await this.users.changePassword(
+      payload.sub,
+      dto.currentPassword,
+      dto.newPassword,
+    );
+    return { success: true };
   }
 
   /** Загрузка аватара (multipart/form-data, key=avatar) */
