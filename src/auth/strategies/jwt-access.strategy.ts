@@ -22,15 +22,17 @@ export class JwtAccessStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   async validate(payload: JwtPayload): Promise<JwtPayload> {
-    // мгновенная инвалидция access по jti (logout)
-    if (await this.blacklist.has(payload.jti)) {
+    // мгновенная инвалидизация access по jti (logout)
+    if (this.blacklist.has(payload.jti)) {
       throw new UnauthorizedException();
     }
+
     // сверка версии токенов
     const user = await this.users.findById(payload.sub);
     if (!user || (user.tokenVersion ?? 0) !== payload.ver) {
       throw new UnauthorizedException();
     }
+
     return payload;
   }
 }
