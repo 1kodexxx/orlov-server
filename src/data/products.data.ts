@@ -1,5 +1,13 @@
 // src/data/products.data.ts
 
+export interface ProductComment {
+  id: number; // уникальный ID комментария
+  userId: number; // ID пользователя
+  userName: string; // имя автора
+  text: string; // текст комментария
+  createdAt: string; // ISO-дата
+}
+
 export interface Product {
   id: number;
   slug: string;
@@ -17,6 +25,7 @@ export interface Product {
   likes?: number; // product.like_count
   avgRating?: number; // product.avg_rating (1..5, 2 знака)
   commentsCount?: number; // если захочешь показывать число комментов
+  comments: ProductComment[];
 }
 
 export const allProducts: Product[] = [
@@ -38,6 +47,10 @@ export const allProducts: Product[] = [
     collection: 'business',
     description:
       'Роскошный чехол с золотыми вставками, подчёркивающий статус и стиль владельца. Идеально подходит для деловых встреч и торжественных мероприятий.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 2,
@@ -57,6 +70,10 @@ export const allProducts: Product[] = [
     collection: 'limited',
     description:
       'Элегантный чехол из коричневой кожи с тиснением под крокодила и золотыми вставками. Сочетает в себе классику и статус, подчёркивая индивидуальность владельца. Идеально подойдёт как для деловых встреч, так и для повседневного использования. Надёжно защищает ваш смартфон и выглядит безупречно в любой обстановке.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 3,
@@ -76,6 +93,10 @@ export const allProducts: Product[] = [
     collection: 'premium',
     description:
       'Стильный серый чехол с фактурной поверхностью и утонченными золотыми акцентами. Совмещает строгую элегантность и практичность. Идеально подойдёт для тех, кто предпочитает универсальный и сдержанный стиль. Защищает смартфон от повреждений, при этом подчёркивая вкус и статус владельца.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 4,
@@ -95,6 +116,10 @@ export const allProducts: Product[] = [
     collection: 'business',
     description:
       'Премиальный чехол из кожи с тиснением под крокодила в тёплом тёмно-коричневом оттенке. Золотая рамка подчёркивает роскошь и внимание к деталям. Идеальный аксессуар для тех, кто ценит утончённый стиль и надёжную защиту. Прекрасно подойдёт как для делового образа, так и для повседневного использования.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 5,
@@ -114,6 +139,10 @@ export const allProducts: Product[] = [
     collection: 'premium',
     description:
       'Тёмно-зелёный чехол с тиснением под крокодила и золотой рамкой — воплощение природной силы и изысканности. Его насыщенный цвет напоминает хвойный лес в утреннем свете: сдержанный, глубокий и уверенный. Идеален для тех, кто ценит баланс между естественностью, стилем и статусом. Подчёркивает вкус владельца и надёжно защищает устройство.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 6,
@@ -133,6 +162,10 @@ export const allProducts: Product[] = [
     collection: 'limited',
     description:
       'Глубокий тёмно-красный чехол с текстурой под крокодила и изящной золотой рамкой. Оттенок винного дерева придаёт устройству чувственность и зрелую уверенность. Идеален для тех, кто выбирает стиль без компромиссов и предпочитает выразительность в деталях. Подходит для торжественных мероприятий, вечернего образа и статусного повседневного использования.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 7,
@@ -152,6 +185,10 @@ export const allProducts: Product[] = [
     collection: 'autumn2025',
     description:
       'Чехол из тёмно-коричневой кожи с тиснением под крокодила и благородной золотой рамкой. Его глубокий кофейный оттенок навевает ассоциации с надёжностью, теплом и классикой. Идеальный выбор для тех, кто ценит строгость формы и уютный характер цвета. Отлично сочетается с осенними и зимними образами, подчёркивая уверенный стиль.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 8,
@@ -171,6 +208,10 @@ export const allProducts: Product[] = [
     collection: 'autumn2025',
     description:
       'Премиальный чехол из тёмно-синей кожи с тиснением под крокодила и элегантной золотой окантовкой. Сдержанный, но выразительный стиль идеально подойдёт для тех, кто предпочитает уверенность без лишней демонстрации. Глубокий оттенок сапфира подчёркивает статус и вкус владельца. Прекрасно сочетается с классическими и деловыми образами.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 9,
@@ -190,6 +231,10 @@ export const allProducts: Product[] = [
     collection: 'autumn2025',
     description:
       'Белый кожаный чехол с блестящей золотой отделкой. Совмещает прохладную строгость и утончённый стиль для динамичного ритма жизни.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 10,
@@ -209,6 +254,10 @@ export const allProducts: Product[] = [
     collection: 'limited',
     description:
       'Ярко-красный чехол с металлическими вставками. Подчёркивает страсть, силу и смелость своего владельца.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 11,
@@ -228,6 +277,10 @@ export const allProducts: Product[] = [
     collection: 'business',
     description:
       'Изумрудный силиконовый чехол с золотыми деталями. Лёгкий, стильный и изысканный выбор для повседневного использования.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 12,
@@ -247,6 +300,10 @@ export const allProducts: Product[] = [
     collection: 'premium',
     description:
       'Графитовый кожаный чехол с минималистичным золотым акцентом. Идеально подходит для строгого офисного стиля.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 13,
@@ -266,6 +323,10 @@ export const allProducts: Product[] = [
     collection: 'business',
     description:
       'Чехол в стиле холодного металла с изящной золотой отделкой. Подойдёт для тех, кто ценит надёжность и силу в каждом аксессуаре.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 14,
@@ -285,6 +346,10 @@ export const allProducts: Product[] = [
     collection: 'autumn2025',
     description:
       'Нежный розовый чехол с золотыми вставками. Стильный и элегантный аксессуар для утончённой повседневности и праздничных мероприятий.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 15,
@@ -305,6 +370,10 @@ export const allProducts: Product[] = [
     collection: 'limited',
     description:
       'Элегантный чехол с лёгким лавандовым оттенком и золотыми акцентами. Универсальный выбор для женственного и утончённого образа.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 16,
@@ -324,6 +393,10 @@ export const allProducts: Product[] = [
     collection: 'premium',
     description:
       'Брутальный металлический чехол с бронзовым отливом. Идеален для тех, кто ценит надёжность, силу и стиль без излишеств.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 17,
@@ -343,6 +416,10 @@ export const allProducts: Product[] = [
     collection: 'business',
     description:
       'Сдержанный белый чехол с золотыми элементами. Подходит для деловых людей, предпочитающих минимализм и холодную элегантность.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 18,
@@ -362,6 +439,10 @@ export const allProducts: Product[] = [
     collection: 'autumn2025',
     description:
       'Тёмно-зелёный чехол с тиснением под кожу и лёгким золотым кантом. Подходит для уверенных в себе людей, предпочитающих классику.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 19,
@@ -381,6 +462,10 @@ export const allProducts: Product[] = [
     collection: 'limited',
     description:
       'Глубокий синий чехол с золотыми вставками. Элегантное решение для тех, кто предпочитает спокойную роскошь и статусные аксессуары.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 20,
@@ -400,6 +485,10 @@ export const allProducts: Product[] = [
     collection: 'premium',
     description:
       'Серый чехол с матовым покрытием и золотой отделкой. Универсальный стиль для делового ритма и повседневного комфорта.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 21,
@@ -419,6 +508,10 @@ export const allProducts: Product[] = [
     collection: 'business',
     description:
       'Глубокий бордовый чехол с золотым декором. Идеально подходит для вечерних мероприятий и стильных деловых образов.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 22,
@@ -438,6 +531,10 @@ export const allProducts: Product[] = [
     collection: 'autumn2025',
     description:
       'Чехол насыщенного тёмно-красного цвета с изящной золотой отделкой. Создан для тех, кто ценит силу, историю и стиль.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 23,
@@ -457,6 +554,10 @@ export const allProducts: Product[] = [
     collection: 'limited',
     description:
       'Изысканный белый чехол с тиснением под бархат и утончённой золотой рамкой. Подходит для деловых и торжественных встреч.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 24,
@@ -476,6 +577,10 @@ export const allProducts: Product[] = [
     collection: 'premium',
     description:
       'Классический зелёный чехол с благородной золотой отделкой. Элегантный выбор для тех, кто предпочитает практичность и стиль.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 25,
@@ -495,6 +600,10 @@ export const allProducts: Product[] = [
     collection: 'business',
     description:
       'Лёгкий серый чехол с мягким матовым покрытием и золотыми акцентами. Подходит для тех, кто предпочитает сдержанный стиль с лёгким налётом роскоши.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 26,
@@ -514,6 +623,10 @@ export const allProducts: Product[] = [
     collection: 'premium',
     description:
       'Насыщенный синий чехол с золотой отделкой. Подчёркивает строгость и уверенность. Идеально подходит для деловых встреч.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 27,
@@ -533,6 +646,10 @@ export const allProducts: Product[] = [
     collection: 'autumn2025',
     description:
       'Чехол с текстурой под металл и золотыми вставками. Символизирует силу, уверенность и надёжность в каждой детали.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 28,
@@ -552,6 +669,10 @@ export const allProducts: Product[] = [
     collection: 'limited',
     description:
       'Нежный розовый чехол с бархатной текстурой и изысканным золотым кантом. Идеальный выбор для утончённого и лёгкого образа.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 29,
@@ -571,6 +692,10 @@ export const allProducts: Product[] = [
     collection: 'autumn2025',
     description:
       'Чехол с золотой текстурой и лёгким осенним оттенком. Подходит для тех, кто ценит тёплую роскошь и природную гармонию.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 30,
@@ -590,6 +715,10 @@ export const allProducts: Product[] = [
     collection: 'premium',
     description:
       'Глубокий бордовый чехол с классической золотой отделкой. Идеален для делового стиля и ежедневного использования.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 31,
@@ -609,6 +738,10 @@ export const allProducts: Product[] = [
     collection: 'limited',
     description:
       'Тёмно-зелёный чехол с золотой рамкой. Отлично подойдёт для вечернего образа и подчёркивает высокий статус владельца.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 32,
@@ -628,6 +761,10 @@ export const allProducts: Product[] = [
     collection: 'business',
     description:
       'Белый чехол с холодным металлическим блеском и золотыми акцентами. Идеален для тех, кто ценит минимализм и стиль.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 33,
@@ -647,6 +784,10 @@ export const allProducts: Product[] = [
     collection: 'premium',
     description:
       'Насыщенный синий кожаный чехол с золотым кантом. Подходит для делового и повседневного образа.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 34,
@@ -666,6 +807,10 @@ export const allProducts: Product[] = [
     collection: 'autumn2025',
     description:
       'Тёмно-коричневый чехол с кофейным оттенком и золотой отделкой. Лаконичный выбор для спокойного, уверенного стиля.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 35,
@@ -685,6 +830,10 @@ export const allProducts: Product[] = [
     collection: 'limited',
     description:
       'Светлый кожаный чехол с утончённым блеском и золотым акцентом. Идеальный выбор для изысканного вечернего стиля.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 36,
@@ -704,6 +853,10 @@ export const allProducts: Product[] = [
     collection: 'autumn2025',
     description:
       'Глубокий синий чехол с золотой окантовкой. Подчёркивает спокойствие, надёжность и уверенность владельца.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 37,
@@ -723,6 +876,10 @@ export const allProducts: Product[] = [
     collection: 'business',
     description:
       'Чехол глубокого коричневого оттенка с лёгким золотистым отливом. Идеален для делового ритма и уверенного образа.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 38,
@@ -742,6 +899,10 @@ export const allProducts: Product[] = [
     collection: 'premium',
     description:
       'Насыщенный тёмно-красный чехол с золотой рамкой. Подходит для ценителей величия, традиций и выразительного дизайна.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 39,
@@ -761,6 +922,10 @@ export const allProducts: Product[] = [
     collection: 'autumn2025',
     description:
       'Зелёный чехол с глубокой северной тональностью и золотыми вставками. Универсальный и стильный аксессуар для любого образа.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 40,
@@ -780,6 +945,10 @@ export const allProducts: Product[] = [
     collection: 'limited',
     description:
       'Графитовый чехол с металлическим блеском и золотым кантом. Сдержанный стиль для деловых и уверенных людей.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 41,
@@ -799,6 +968,10 @@ export const allProducts: Product[] = [
     collection: 'business',
     description:
       'Мягкий розовый чехол с золотым декором. Идеально подходит для лёгкого, утончённого стиля и повседневного использования.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 42,
@@ -818,6 +991,10 @@ export const allProducts: Product[] = [
     collection: 'premium',
     description:
       'Насыщенный синий чехол с благородной золотой рамкой. Создан для поклонников классического мужского стиля и уверенной элегантности.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 43,
@@ -837,6 +1014,10 @@ export const allProducts: Product[] = [
     collection: 'autumn2025',
     description:
       'Тёмно-коричневый чехол с золотыми акцентами. Подчёркивает строгий стиль и прекрасно вписывается в деловой гардероб.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
   {
     id: 44,
@@ -856,5 +1037,9 @@ export const allProducts: Product[] = [
     collection: 'limited',
     description:
       'Золотой чехол с лёгким рельефом и изящной отделкой. Яркий и смелый выбор для тех, кто предпочитает акцентные аксессуары.',
+    views: 0,
+    likes: 0,
+    avgRating: 0,
+    comments: [],
   },
 ];
