@@ -1,8 +1,8 @@
 import 'reflect-metadata';
-import dataSource from '../data-source';
+import dataSource from '../../database/data-source';
 
 import { testimonials } from '../../data/reviews.data';
-import { CompanyReview } from '../../company-reviews/company-reviews.entity';
+import { CompanyReview } from '../company-reviews.entity';
 import { User } from '../../users/users.entity';
 
 function splitName(full: string): { firstName: string; lastName: string } {
