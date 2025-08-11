@@ -1,4 +1,3 @@
-// src/users/users.entity.ts
 import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 export type UserRole = 'admin' | 'manager' | 'customer';
@@ -38,4 +37,16 @@ export class User {
 
   @Column({ name: 'token_version', type: 'int', default: 0 })
   tokenVersion!: number;
+
+  // ↓↓↓ Новые необязательные поля для подписи на карточке отзыва
+  @Column({ name: 'headline', type: 'varchar', length: 200, nullable: true })
+  headline!: string | null;
+
+  @Column({
+    name: 'organization',
+    type: 'varchar',
+    length: 200,
+    nullable: true,
+  })
+  organization!: string | null;
 }
