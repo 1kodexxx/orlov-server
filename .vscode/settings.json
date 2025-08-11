@@ -5,6 +5,7 @@
   "material-icon-theme.folders.associations": {
     "comments": "messages",
     "users": "admin",
-    "sections": "base"
+    "sections": "base",
+    "data": "base"
   }
 }
