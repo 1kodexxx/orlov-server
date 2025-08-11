@@ -1,3 +1,4 @@
+// src/database/migrations/1700000000006-add-category-slug.ts
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class AddCategorySlug1700000000006 implements MigrationInterface {
