@@ -1,3 +1,4 @@
+// src/company-reviews/company-reviews.service.ts
 import {
   Injectable,
   ForbiddenException,
@@ -6,8 +7,15 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import { CompanyReview } from './company-reviews.entity';
-import { CreateCompanyReviewDto } from './dto/create-company-review.dto';
-import { UpdateCompanyReviewDto } from './dto/update-company-review.dto';
+
+export type CompanyStats = {
+  avg_company_rating: number;
+  reviews_count: number;
+};
+
+type UpdatableFields = Partial<
+  Pick<CompanyReview, 'rating' | 'text' | 'isApproved'>
+>;
 
 @Injectable()
 export class CompanyReviewsService {
@@ -16,14 +24,14 @@ export class CompanyReviewsService {
     private readonly repo: Repository<CompanyReview>,
   ) {}
 
-  async create(dto: CreateCompanyReviewDto, customerId: number) {
+  async create(dto: { rating: number; text: string }, customerId: number) {
     const entity = this.repo.create({
       customerId,
       rating: dto.rating,
       text: dto.text,
       isApproved: false,
     });
-    return await this.repo.save(entity);
+    return this.repo.save(entity);
   }
 
   private baseQB(): SelectQueryBuilder<CompanyReview> {
@@ -57,17 +65,15 @@ export class CompanyReviewsService {
   }
 
   async findMine(customerId: number, page = 1, limit = 20) {
-    const qb = this.baseQB()
-      .where('r.customerId = :cid', { cid: customerId })
-      .skip((page - 1) * limit)
-      .take(limit);
+    const qb = this.baseQB().where('r.customerId = :cid', { cid: customerId });
+    qb.skip((page - 1) * limit).take(limit);
     const [items, total] = await qb.getManyAndCount();
     return { items, total, page, limit };
   }
 
   async update(
     id: string,
-    dto: UpdateCompanyReviewDto,
+    dto: UpdatableFields,
     actor: { id: number; role: string },
   ) {
     const review = await this.repo.findOne({ where: { id } });
@@ -84,12 +90,14 @@ export class CompanyReviewsService {
     if (!isOwner && !isAdmin) {
       throw new ForbiddenException('You cannot edit this review');
     }
-    if (!isAdmin && typeof dto.isApproved !== 'undefined') {
-      delete dto.isApproved;
-    }
 
-    Object.assign(review, dto);
-    return await this.repo.save(review);
+    // не-админу запрещаем менять isApproved — убираем поле без any
+    const payload: UpdatableFields = !isAdmin
+      ? (({ rating, text }) => ({ rating, text }))(dto)
+      : dto;
+
+    Object.assign(review, payload);
+    return this.repo.save(review);
   }
 
   async approve(id: string, actorRole: string) {
@@ -97,7 +105,7 @@ export class CompanyReviewsService {
     const review = await this.repo.findOne({ where: { id } });
     if (!review) throw new NotFoundException('Review not found');
     review.isApproved = true;
-    return await this.repo.save(review);
+    return this.repo.save(review);
   }
 
   async remove(id: string, actor: { id: number; role: string }) {
@@ -117,10 +125,28 @@ export class CompanyReviewsService {
     await this.repo.remove(review);
   }
 
-  async stats() {
-    // Берём агрегат из VIEW (создадим миграцией)
-    const rows = await this.repo.query(`SELECT * FROM company_rating_view`);
-    return rows?.[0] ?? { avg_company_rating: 0, reviews_count: 0 };
+  async stats(): Promise<CompanyStats> {
+    const rows: Array<{
+      avg_company_rating: string | number | null;
+      reviews_count: string | number | null;
+    }> = await this.repo.query(`SELECT * FROM company_rating_view`);
+
+    const r = rows[0] ?? { avg_company_rating: 0, reviews_count: 0 };
+
+    const avgRaw = r.avg_company_rating;
+    const cntRaw = r.reviews_count;
+
+    const avg =
+      avgRaw == null
+        ? 0
+        : typeof avgRaw === 'string'
+          ? parseFloat(avgRaw)
+          : avgRaw;
+    const count = cntRaw == null ? 0 : Number(cntRaw);
+
+    return {
+      avg_company_rating: Number.isFinite(avg) ? avg : 0,
+      reviews_count: count,
+    };
   }
 }
-ы;

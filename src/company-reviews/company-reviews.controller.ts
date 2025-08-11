@@ -1,4 +1,3 @@
-// src/company-reviews/company-reviews.controller.ts
 import {
   Body,
   Controller,
@@ -13,24 +12,18 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { CompanyReviewsService } from './company-reviews.service';
+import { CompanyReviewsService, CompanyStats } from './company-reviews.service';
 import { CreateCompanyReviewDto } from './dto/create-company-review.dto';
 import { UpdateCompanyReviewDto } from './dto/update-company-review.dto';
 import { QueryCompanyReviewDto } from './dto/query-company-review.dto';
 
-import { JwtAuthGuard } from '../auth/guards'; // у тебя есть index.ts с реэкспортом — ок
+import { JwtAuthGuard } from '../auth/guards';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-
 import { JwtPayload, isJwtPayload } from '../auth/types';
 
-type CompanyStats = { avg_company_rating: number; reviews_count: number };
-
-/** Безопасно достать пользователя из req.user */
 function getJwtUser(req: Request): JwtPayload {
-  if (!isJwtPayload(req.user)) {
-    throw new UnauthorizedException();
-  }
+  if (!isJwtPayload(req.user)) throw new UnauthorizedException();
   return req.user;
 }
 
@@ -61,9 +54,8 @@ export class CompanyReviewsController {
           fullName: `${r.customer.firstName} ${r.customer.lastName}`.trim(),
           email: r.customer.email,
           avatarUrl: r.customer.avatarUrl ?? null,
-          // Эти поля присутствуют в entity пользователя, иначе останутся null
-          headline: (r.customer as any)?.headline ?? null,
-          organization: (r.customer as any)?.organization ?? null,
+          headline: r.customer.headline ?? null,
+          organization: r.customer.organization ?? null,
         },
       })),
     };
@@ -120,13 +112,6 @@ export class CompanyReviewsController {
   // Статистика
   @Get('stats')
   async stats(): Promise<CompanyStats> {
-    const raw = await this.service.stats(); // может вернуть string/number
-    return {
-      avg_company_rating:
-        typeof (raw as any).avg_company_rating === 'string'
-          ? parseFloat((raw as any).avg_company_rating)
-          : ((raw as any).avg_company_rating ?? 0),
-      reviews_count: Number((raw as any).reviews_count ?? 0),
-    };
+    return this.service.stats();
   }
 }
