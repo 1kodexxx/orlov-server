@@ -50,7 +50,7 @@ export class Product {
   @ManyToOne(() => PhoneModel, (m: PhoneModel) => m.products, {
     nullable: false,
   })
-  @JoinColumn({ name: 'phone_model_id' }) // FK → phone_model(model_id)
+  @JoinColumn({ name: 'phone_model_id' })
   phoneModel!: PhoneModel;
 
   @ManyToMany(() => Category, { cascade: false })
@@ -77,7 +77,6 @@ export class Product {
   })
   avgRating!: number;
 
-  // Если в БД есть эти колонки — оставляем; если нет, можно удалить.
   @Column({
     name: 'created_at',
     type: 'timestamptz',

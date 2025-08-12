@@ -29,10 +29,11 @@ export class Review {
   @Column({ name: 'rating', type: 'int' })
   rating!: number; // 1..5
 
-  @Column({ name: 'text', type: 'text', nullable: true })
-  text!: string | null;
+  /** в твоей миграции колонка называется comment */
+  @Column({ name: 'comment', type: 'text', nullable: true })
+  comment!: string | null;
 
-  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  @CreateDateColumn({ name: 'review_date', type: 'timestamptz' })
   createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })

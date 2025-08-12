@@ -1,4 +1,3 @@
-// src/users/users.controller.ts
 import {
   Controller,
   Get,
@@ -25,6 +24,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { ChangeEmailDto } from './dto/change-email.dto';
 
 type Role = 'admin' | 'manager' | 'customer';
 interface JwtPayloadLike {
@@ -54,6 +54,13 @@ export class UsersController {
   async updateMe(@Req() req: Request, @Body() dto: UpdateProfileDto) {
     const payload = req.user as JwtPayloadLike;
     return this.users.updateProfile(payload.sub, dto);
+  }
+
+  /** Смена email */
+  @Patch('me/email')
+  async changeEmail(@Req() req: Request, @Body() dto: ChangeEmailDto) {
+    const payload = req.user as JwtPayloadLike;
+    return this.users.changeEmail(payload.sub, dto.email);
   }
 
   @Patch('me/password')
@@ -108,6 +115,27 @@ export class UsersController {
       file.path,
     );
     return { avatarUrl };
+  }
+
+  /** ЛК: избранное (все лайкнутые товары) */
+  @Get('me/likes')
+  async myLikes(@Req() req: Request) {
+    const payload = req.user as JwtPayloadLike;
+    return this.users.getMyLikedProducts(payload.sub);
+  }
+
+  /** ЛК: мои комментарии к товарам */
+  @Get('me/comments')
+  async myComments(@Req() req: Request) {
+    const payload = req.user as JwtPayloadLike;
+    return this.users.getMyProductComments(payload.sub);
+  }
+
+  /** ЛК: мои отзывы о компании */
+  @Get('me/company-reviews')
+  async myCompanyReviews(@Req() req: Request) {
+    const payload = req.user as JwtPayloadLike;
+    return this.users.getMyCompanyReviews(payload.sub);
   }
 
   @Delete('me')

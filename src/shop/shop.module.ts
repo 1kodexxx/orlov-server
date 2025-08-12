@@ -6,13 +6,9 @@ import { ShopController } from './shop.controller';
 import { Product } from './entities/product.entity';
 import { Category } from './entities/category.entity';
 import { PhoneModel } from './entities/phone-model.entity';
-import { ViewsModule } from '../views/views.module'; // <-- ВАЖНО
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Product, Category, PhoneModel]),
-    ViewsModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Product, Category, PhoneModel])],
   controllers: [ShopController],
   providers: [ShopService],
   exports: [ShopService],

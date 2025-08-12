@@ -25,12 +25,17 @@ export class ProductView {
   @JoinColumn({ name: 'customer_id' })
   customer?: User | null;
 
-  @Column({ name: 'ip', type: 'varchar', length: 64, nullable: true })
+  /** антинакрутка: посетитель-гость */
+  @Column({ name: 'visitor_id', type: 'text', nullable: true })
+  visitorId!: string | null;
+
+  @Column({ name: 'ip', type: 'inet', nullable: true })
   ip!: string | null;
 
   @Column({ name: 'user_agent', type: 'varchar', length: 512, nullable: true })
   userAgent!: string | null;
 
-  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
-  createdAt!: Date;
+  /** колонка в миграции называется viewed_at */
+  @CreateDateColumn({ name: 'viewed_at', type: 'timestamptz' })
+  viewedAt!: Date;
 }

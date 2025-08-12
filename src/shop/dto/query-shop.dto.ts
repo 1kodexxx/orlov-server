@@ -7,7 +7,6 @@ import {
   IsOptional,
   IsPositive,
   IsString,
-  Max,
   Min,
 } from 'class-validator';
 
@@ -16,15 +15,30 @@ const toInt = ({ value }: TransformFnParams): number | undefined => {
   const n = Number.parseInt(String(value), 10);
   return Number.isNaN(n) ? undefined : n;
 };
-
 const toFloat = ({ value }: TransformFnParams): number | undefined => {
   if (value === undefined || value === null || value === '') return undefined;
   const n = Number.parseFloat(String(value));
   return Number.isNaN(n) ? undefined : n;
 };
+const toCsv = ({ value }: TransformFnParams): string[] | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  return String(value)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+};
 
-export type SortKey = 'price' | 'rating' | 'popular' | 'new';
-export type SortInput = `${'' | '-'}${SortKey}`;
+export type SortKey =
+  | 'relevance'
+  | 'price_asc'
+  | 'price_desc'
+  | 'rating_desc'
+  | 'rating_asc'
+  | 'views_desc'
+  | 'likes_desc'
+  | 'newest'
+  | 'name_asc'
+  | 'name_desc';
 
 export class QueryShopDto {
   @IsOptional()
@@ -37,48 +51,58 @@ export class QueryShopDto {
   @Transform(toInt)
   @IsInt()
   @Min(1)
-  @Max(100)
-  limit?: number = 20;
+  @IsPositive()
+  limit?: number = 24;
 
+  /** Поиск */
   @IsOptional()
   @IsString()
   q?: string;
 
+  /** Чипсы категорий/тегов — шлём слаги через запятую */
   @IsOptional()
-  @Transform(toInt)
-  @IsInt()
-  @IsPositive()
-  categoryId?: number;
+  @Transform(toCsv)
+  categories?: string[];
+
+  /** Материалы / Коллекции / Популярность — также слаги (если это просто категории — фронт может передавать их сюда тоже) */
+  @IsOptional()
+  @Transform(toCsv)
+  materials?: string[];
 
   @IsOptional()
-  @Transform(toInt)
-  @IsInt()
-  @IsPositive()
-  modelId?: number;
+  @Transform(toCsv)
+  collections?: string[];
 
+  @IsOptional()
+  @Transform(toCsv)
+  popularity?: string[];
+
+  /** Диапазон цены */
   @IsOptional()
   @Transform(toFloat)
-  @IsNumber({ allowInfinity: false, allowNaN: false })
+  @IsNumber()
   priceMin?: number;
 
   @IsOptional()
   @Transform(toFloat)
-  @IsNumber({ allowInfinity: false, allowNaN: false })
+  @IsNumber()
   priceMax?: number;
 
+  /** Сортировка */
   @IsOptional()
-  @IsString()
   @IsIn([
-    'price',
-    '-price',
-    'rating',
-    '-rating',
-    'popular',
-    '-popular',
-    'new',
-    '-new',
+    'relevance',
+    'price_asc',
+    'price_desc',
+    'rating_desc',
+    'rating_asc',
+    'views_desc',
+    'likes_desc',
+    'newest',
+    'name_asc',
+    'name_desc',
   ])
-  sort?: SortInput = 'new';
+  sort?: SortKey = 'relevance';
 }
 
 export class GetShopParamsDto {
