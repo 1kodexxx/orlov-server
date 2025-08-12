@@ -1,5 +1,4 @@
-// src/app.module.ts
-import { Module, Logger } from '@nestjs/common';
+import { Module, Logger, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
@@ -10,35 +9,32 @@ import { join } from 'path';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { ViewsModule } from './views/views.module';
-import { ShopModule } from './shop/shop.module';
+import { CatalogModule } from './catalog/catalog.module'; // модуль можно не переименовывать
+import { VisitorIdMiddleware } from './common/visitor/visitor-id.middleware';
 
 @Module({
   imports: [
-    // ⬇️ раздаём папку uploads по пути /static
+    // раздаём uploads по /static
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), 'uploads'),
       serveRoot: '/static',
-      serveStaticOptions: {
-        index: false,
-        // fallthrough:false — чтобы не было «Cannot GET ...», а сразу 404 отдавалось express-static
-        fallthrough: false,
-      },
+      serveStaticOptions: { index: false, fallthrough: false },
     }),
     ViewsModule,
     UsersModule,
-    ShopModule,
+    CatalogModule,
     AuthModule,
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
+      useFactory: (config: ConfigService) => ({
         type: 'postgres',
-        host: configService.get<string>('DATABASE_HOST'),
-        port: configService.get<number>('DATABASE_PORT'),
-        username: configService.get<string>('DATABASE_USER'),
-        password: configService.get<string>('DATABASE_PASSWORD'),
-        database: configService.get<string>('DATABASE_NAME'),
+        host: config.get<string>('DATABASE_HOST'),
+        port: config.get<number>('DATABASE_PORT'),
+        username: config.get<string>('DATABASE_USER'),
+        password: config.get<string>('DATABASE_PASSWORD'),
+        database: config.get<string>('DATABASE_NAME'),
         autoLoadEntities: true,
         synchronize: false,
         logging: true,
@@ -46,13 +42,19 @@ import { ShopModule } from './shop/shop.module';
     }),
   ],
 })
-export class AppModule {
+export class AppModule implements NestModule {
   private readonly logger = new Logger(AppModule.name);
-  constructor(private dataSource: DataSource) {
+
+  constructor(private readonly dataSource: DataSource) {
     if (this.dataSource.isInitialized) {
       this.logger.log('✅ Подключение к базе данных установлено успешно');
     } else {
       this.logger.error('❌ Не удалось подключиться к базе данных');
     }
+  }
+
+  configure(consumer: MiddlewareConsumer) {
+    // выдаём/читаем visitorId на всех маршрутах каталога
+    consumer.apply(VisitorIdMiddleware).forRoutes('catalog');
   }
 }

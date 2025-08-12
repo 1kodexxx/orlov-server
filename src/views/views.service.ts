@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ProductView } from '../shop/entities/product-view.entity';
-import { Product } from '../shop/entities/product.entity';
+import { ProductView } from '../catalog/entities/product-view.entity';
+import { Product } from '../catalog/entities/product.entity';
 import { User } from '../users/users.entity';
 
 @Injectable()

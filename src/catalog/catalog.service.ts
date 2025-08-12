@@ -1,4 +1,3 @@
-// src/shop/shop.service.ts
 import {
   Injectable,
   BadRequestException,
@@ -13,7 +12,7 @@ import { AddCommentDto } from './dto/add-comment.dto';
 import { Category } from './entities/category.entity';
 import { PhoneModel } from './entities/phone-model.entity';
 
-/** Что лежит во VIEW v_product_full (минимально нужное для каталога/карточки) */
+/** Строка из VIEW v_product_full (минимально нужное для каталога/карточки) */
 export type ProductRow = {
   product_id: number;
   sku: string;
@@ -25,13 +24,11 @@ export type ProductRow = {
   avg_rating: number;
   created_at: string;
   updated_at: string;
-  /** массивы категорий из v_product_full */
   categories: string[];
   materials: string[];
   collections: string[];
   popularity: string[];
-  /** опционально — если ты добавлял массив картинок во вьюху */
-  images?: string[];
+  images?: string[] | Array<{ url: string; position: number }>;
 };
 
 export type CommentRow = {
@@ -55,8 +52,11 @@ type Paged<T> = {
 type Kind = 'normal' | 'material' | 'collection' | 'popularity';
 type MetaRow = { name: string; kind: Kind };
 
+/** Владелец лайка: либо авторизованный пользователь, либо гость по visitorId */
+type LikeOwner = { customerId?: number | null; visitorId?: string | null };
+
 @Injectable()
-export class ShopService {
+export class CatalogService {
   constructor(
     private readonly ds: DataSource,
     @InjectRepository(Category)
@@ -68,6 +68,15 @@ export class ShopService {
   private static toInt(x: unknown, fallback = 0): number {
     const n = Number(x);
     return Number.isFinite(n) ? n : fallback;
+  }
+
+  private async recalcLikeCount(productId: number): Promise<void> {
+    await this.ds.query(
+      `UPDATE product
+          SET like_count = (SELECT COUNT(*)::int FROM product_like pl WHERE pl.product_id = $1)
+        WHERE product_id = $1`,
+      [productId],
+    );
   }
 
   /** Каталог с фильтрами/сортировкой (поверх VIEW v_product_full) */
@@ -102,7 +111,6 @@ export class ShopService {
     if (priceMin != null) qb.andWhere('vp.price >= :priceMin', { priceMin });
     if (priceMax != null) qb.andWhere('vp.price <= :priceMax', { priceMax });
 
-    // фильтр “любой из списка” по массивным полям в VIEW
     const anyFrom = (values: string[], fieldSql: string) => {
       if (!values.length) return;
       qb.andWhere(
@@ -115,7 +123,6 @@ export class ShopService {
     anyFrom(collections, 'vp.collections');
     anyFrom(popularity, 'vp.popularity');
 
-    // сортировки
     switch (sort) {
       case 'name_asc':
         qb.orderBy('vp.name', 'ASC');
@@ -157,7 +164,6 @@ export class ShopService {
           .addOrderBy('vp.created_at', 'DESC');
     }
 
-    // тот же where для COUNT(*)
     const totalQb = this.ds
       .createQueryBuilder()
       .select('COUNT(*)', 'count')
@@ -175,7 +181,7 @@ export class ShopService {
     ]);
 
     const items: ProductRow[] = itemsRaw;
-    const total = ShopService.toInt(totalRaw?.count, 0);
+    const total = CatalogService.toInt(totalRaw?.count, 0);
 
     return {
       items,
@@ -222,25 +228,87 @@ export class ShopService {
     return { ok: true };
   }
 
-  /** Лайк/анлайк — только авторизованным */
+  /* ===================== ЛАЙКИ ===================== */
+
+  /** Совместимость: лайк только авторизованным */
   async like(productId: number, userId: number): Promise<{ liked: true }> {
     await this.ds.query(
       `INSERT INTO product_like (product_id, customer_id) VALUES ($1,$2)
        ON CONFLICT DO NOTHING`,
       [productId, userId],
     );
+    await this.recalcLikeCount(productId);
     return { liked: true };
   }
 
+  /** Совместимость: снять лайк только авторизованным */
   async unlike(productId: number, userId: number): Promise<{ liked: false }> {
     await this.ds.query(
       `DELETE FROM product_like WHERE product_id=$1 AND customer_id=$2`,
       [productId, userId],
     );
+    await this.recalcLikeCount(productId);
     return { liked: false };
   }
 
-  /** Рейтинг 1–5. Разрешаем обновление своей оценки. */
+  /** Публичный лайк: авторизованный или гость по visitorId. Идемпотентно. */
+  async likePublic(
+    productId: number,
+    owner: LikeOwner,
+  ): Promise<{ liked: true }> {
+    const customerId = owner.customerId ?? null;
+    const visitorId = owner.visitorId ?? null;
+    if (!customerId && !visitorId) {
+      throw new BadRequestException('owner required');
+    }
+
+    await this.ds.query(
+      `INSERT INTO product_like(product_id, customer_id, visitor_id)
+       VALUES ($1, $2, $3)
+       ON CONFLICT DO NOTHING`,
+      [productId, customerId, visitorId],
+    );
+    await this.recalcLikeCount(productId);
+    return { liked: true };
+  }
+
+  /** Публичное снятие лайка. */
+  async unlikePublic(
+    productId: number,
+    owner: LikeOwner,
+  ): Promise<{ liked: false }> {
+    const customerId = owner.customerId ?? null;
+    const visitorId = owner.visitorId ?? null;
+
+    await this.ds.query(
+      `DELETE FROM product_like
+        WHERE product_id = $1
+          AND (customer_id = $2 OR visitor_id = $3)`,
+      [productId, customerId, visitorId],
+    );
+    await this.recalcLikeCount(productId);
+    return { liked: false };
+  }
+
+  /** Публичное избранное: если есть user — по нему, иначе — по visitorId */
+  async getFavoritesPublic(owner: LikeOwner): Promise<ProductRow[]> {
+    const customerId = owner.customerId ?? null;
+    const visitorId = owner.visitorId ?? null;
+
+    const rows = await this.ds.query<ProductRow[]>(
+      `SELECT vp.*
+         FROM product_like pl
+         JOIN v_product_full vp ON vp.product_id = pl.product_id
+        WHERE ($1::int  IS NOT NULL AND pl.customer_id = $1)
+           OR ($2::uuid IS NOT NULL AND pl.visitor_id = $2)
+        ORDER BY vp.created_at DESC`,
+      [customerId, visitorId],
+    );
+    return rows;
+  }
+
+  /* ===================== РЕЙТИНГИ ===================== */
+
   async setRating(
     productId: number,
     userId: number,
@@ -267,7 +335,8 @@ export class ShopService {
     return { rating: null };
   }
 
-  /** Комментарии к товару */
+  /* ===================== КОММЕНТАРИИ ===================== */
+
   async listComments(
     productId: number,
     page = 1,
@@ -298,7 +367,7 @@ export class ShopService {
       .getRawOne<{ count: string }>();
 
     const [items, totalRaw] = await Promise.all([itemsPromise, totalPromise]);
-    const total = ShopService.toInt(totalRaw?.count, 0);
+    const total = CatalogService.toInt(totalRaw?.count, 0);
 
     return {
       items,
@@ -336,7 +405,8 @@ export class ShopService {
     return { ok: true };
   }
 
-  /** Метаданные для фильтров */
+  /* ===================== МЕТАДАННЫЕ/СПРАВОЧНИКИ ===================== */
+
   async getMeta(): Promise<{
     categories: string[];
     materials: string[];
@@ -346,10 +416,8 @@ export class ShopService {
     const rows = await this.ds.query<MetaRow[]>(
       `SELECT name, kind FROM category ORDER BY kind, name`,
     );
-
     const pick = (k: Kind) =>
       rows.filter((r) => r.kind === k).map((r) => r.name);
-
     return {
       categories: pick('normal'),
       materials: pick('material'),
@@ -358,17 +426,14 @@ export class ShopService {
     };
   }
 
-  /** Для совместимости со старым фронтом */
   getCategories = async (): Promise<Category[]> => {
     return this.categories.find({ order: { name: 'ASC' } });
   };
 
   getPhoneModels = async (): Promise<PhoneModel[]> => {
     return this.models.find({ order: { brand: 'ASC', modelName: 'ASC' } });
-    // если поле в entity называется model_name — поправь ключ
   };
 
-  /** Вспомогательные для карточки */
   async userRatingFor(
     productId: number,
     userId: number,
