@@ -1,3 +1,4 @@
+// src/company-reviews/company-reviews.entity.ts
 import {
   Column,
   CreateDateColumn,

@@ -1,3 +1,4 @@
+// src/company-reviews/company-reviews.module.ts
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CompanyReview } from './company-reviews.entity';

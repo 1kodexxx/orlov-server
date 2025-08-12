@@ -1,3 +1,4 @@
+// src/company-reviews/dto/query-company-review.dto.ts
 import { Type } from 'class-transformer';
 import { IsOptional, IsBooleanString, IsInt, Min } from 'class-validator';
 

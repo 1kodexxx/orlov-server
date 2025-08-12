@@ -1,3 +1,4 @@
+// src/company-reviews/dto/create-company-review.dto.ts
 import { IsInt, Min, Max, IsString, Length } from 'class-validator';
 
 export class CreateCompanyReviewDto {
