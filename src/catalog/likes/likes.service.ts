@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import type { ProductRow } from '../catalog.service';
 
-type Owner = { customerId?: number; visitorId?: string };
+export type Owner = { customerId?: number; visitorId?: string | null };
 
 @Injectable()
 export class LikesService {

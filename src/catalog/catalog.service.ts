@@ -216,7 +216,12 @@ export class CatalogService {
     await this.ds.query(
       `INSERT INTO product_view (product_id, customer_id, visitor_id, ip, user_agent)
        VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT ON CONSTRAINT ux_product_view_daily_guard DO NOTHING`,
+       ON CONFLICT (
+         product_id,
+         date_trunc('day', created_at),
+         COALESCE(customer_id, -1),
+         COALESCE(visitor_id, '00000000-0000-0000-0000-000000000000'::uuid)
+       ) DO NOTHING`,
       [
         productId,
         customerId ?? null,

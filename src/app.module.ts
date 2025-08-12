@@ -1,3 +1,4 @@
+// src/app.module.ts
 import { Module, Logger, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -9,7 +10,8 @@ import { join } from 'path';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { ViewsModule } from './views/views.module';
-import { CatalogModule } from './catalog/catalog.module'; // модуль можно не переименовывать
+import { CatalogModule } from './catalog/catalog.module';
+import { FavoritesModule } from './favorites/favorites.module';
 import { VisitorIdMiddleware } from './common/visitor/visitor-id.middleware';
 
 @Module({
@@ -20,10 +22,13 @@ import { VisitorIdMiddleware } from './common/visitor/visitor-id.middleware';
       serveRoot: '/static',
       serveStaticOptions: { index: false, fallthrough: false },
     }),
+
     ViewsModule,
     UsersModule,
     CatalogModule,
+    FavoritesModule, // ⬅ добавили модуль «Избранное»
     AuthModule,
+
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -54,7 +59,7 @@ export class AppModule implements NestModule {
   }
 
   configure(consumer: MiddlewareConsumer) {
-    // выдаём/читаем visitorId на всех маршрутах каталога
-    consumer.apply(VisitorIdMiddleware).forRoutes('catalog');
+    // выдаём/читаем visitorId для лайков/просмотров и публичного избранного
+    consumer.apply(VisitorIdMiddleware).forRoutes('catalog', 'favorites');
   }
 }
