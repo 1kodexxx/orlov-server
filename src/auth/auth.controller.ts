@@ -20,10 +20,10 @@ import {
   JwtAuthGuard,
   JwtRefreshGuard,
   RefreshOriginGuard,
-} from './guards/index';
-import { JwtPayload, isJwtPayload, PublicUser } from './types';
+} from './guards';
+import { isJwtPayload, PublicUser, isPublicUser } from './types';
 
-type ReqWithMaybeUser = Request & { user?: JwtPayload };
+type ReqWithMaybeUser = Request & { user?: unknown };
 
 const RT_COOKIE_OPTS = {
   httpOnly: true,
@@ -57,21 +57,18 @@ export class AuthController {
     @Req() req: ReqWithMaybeUser,
     @Res({ passthrough: true }) res: Response,
   ) {
-    if (!isJwtPayload(req.user)) throw new UnauthorizedException();
+    // LocalStrategy кладёт PublicUser в req.user
+    const u = req.user;
+    if (!isPublicUser(u)) throw new UnauthorizedException();
 
-    const p = req.user;
-    const { accessToken, refreshToken } = await this.auth.issueTokens({
-      id: p.sub,
-      email: p.email,
-      role: p.role,
-      tokenVersion: p.ver,
-    } satisfies PublicUser);
+    const { accessToken, refreshToken } = await this.auth.issueTokens(u);
 
     res.cookie('rt', refreshToken, {
       ...RT_COOKIE_OPTS,
       maxAge: 7 * 24 * 3600 * 1000,
     });
-    return { accessToken, user: p };
+
+    return { accessToken, user: u };
   }
 
   @UseGuards(JwtRefreshGuard, RefreshOriginGuard)
@@ -81,14 +78,14 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     if (!isJwtPayload(req.user)) throw new UnauthorizedException();
+    const p = req.user; // JwtPayload после type guard
 
-    const p = req.user;
     const { accessToken, refreshToken } = await this.auth.issueTokens({
       id: p.sub,
       email: p.email,
       role: p.role,
       tokenVersion: p.ver,
-    });
+    } as PublicUser);
 
     res.cookie('rt', refreshToken, {
       ...RT_COOKIE_OPTS,
@@ -105,7 +102,9 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     if (!isJwtPayload(req.user)) throw new UnauthorizedException();
-    await this.auth.logout(req.user.sub, req.user.jti);
+    const p = req.user; // JwtPayload
+
+    await this.auth.logout(p.sub, p.jti);
     res.cookie('rt', '', {
       ...RT_COOKIE_OPTS,
       maxAge: 0,
@@ -118,7 +117,8 @@ export class AuthController {
   @Get('me')
   async me(@Req() req: ReqWithMaybeUser) {
     if (!isJwtPayload(req.user)) return { user: null };
-    const profile = await this.auth.getProfile(req.user.sub);
+    const p = req.user; // JwtPayload
+    const profile = await this.auth.getProfile(p.sub);
     return { user: profile };
   }
 }
