@@ -41,9 +41,10 @@ async function upsertCategory(name: string) {
   const slug = slugify(name);
   const row = await dataSource.query(
     `INSERT INTO category(name, slug)
-     VALUES ($1,$2)
-     ON CONFLICT (slug) DO UPDATE SET name=EXCLUDED.name
-     RETURNING category_id`,
+         VALUES ($1, $2)
+         ON CONFLICT ON CONSTRAINT category_name_key
+         DO UPDATE SET slug = EXCLUDED.slug
+         RETURNING category_id`,
     [name, slug],
   );
   return row[0].category_id as number;
@@ -91,9 +92,9 @@ async function upsertProduct(p: SeedProduct, phoneModelId: number) {
 
 async function ensureImage(productId: number, url: string, ord: number) {
   await dataSource.query(
-    `INSERT INTO product_image(product_id, image_url, sort_order)
-     VALUES ($1,$2,$3)
-     ON CONFLICT ON CONSTRAINT product_image_product_id_image_url_key DO NOTHING`,
+    `INSERT INTO product_image (product_id, url, "position")
+     VALUES ($1, $2, $3)
+     ON CONFLICT (product_id, url) DO NOTHING`,
     [productId, url, ord],
   );
 }
