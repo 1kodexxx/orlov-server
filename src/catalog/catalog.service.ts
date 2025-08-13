@@ -1,3 +1,4 @@
+// src/catalog/catalog.service.ts
 import {
   Injectable,
   BadRequestException,
@@ -111,17 +112,19 @@ export class CatalogService {
     if (priceMin != null) qb.andWhere('vp.price >= :priceMin', { priceMin });
     if (priceMax != null) qb.andWhere('vp.price <= :priceMax', { priceMax });
 
-    const anyFrom = (values: string[], fieldSql: string) => {
+    // безопасные имена параметров + ANY(:param)
+    const anyFrom = (values: string[], fieldSql: string, param: string) => {
       if (!values.length) return;
       qb.andWhere(
-        `EXISTS (SELECT 1 FROM unnest(${fieldSql}) AS x(name) WHERE x.name = ANY(:v_${fieldSql}))`,
-      ).setParameter(`v_${fieldSql}`, values);
+        `EXISTS (SELECT 1 FROM unnest(${fieldSql}) AS x(name) WHERE x.name = ANY(:${param}))`,
+        { [param]: values },
+      );
     };
 
-    anyFrom(categories, 'vp.categories');
-    anyFrom(materials, 'vp.materials');
-    anyFrom(collections, 'vp.collections');
-    anyFrom(popularity, 'vp.popularity');
+    anyFrom(categories, 'vp.categories', 'cats');
+    anyFrom(materials, 'vp.materials', 'mats');
+    anyFrom(collections, 'vp.collections', 'cols');
+    anyFrom(popularity, 'vp.popularity', 'pops');
 
     switch (sort) {
       case 'name_asc':
@@ -164,10 +167,12 @@ export class CatalogService {
           .addOrderBy('vp.created_at', 'DESC');
     }
 
+    // корректный total (копируем where)
     const totalQb = this.ds
       .createQueryBuilder()
       .select('COUNT(*)', 'count')
       .from('v_product_full', 'vp');
+
     totalQb.setParameters(qb.getParameters());
     (qb.expressionMap.wheres || []).forEach((w) =>
       totalQb.andWhere(w.condition),
@@ -205,7 +210,7 @@ export class CatalogService {
     return row;
   }
 
-  /** Просмотры: всем (аноним/юзер). Уникальность ограничивается индексом в БД. */
+  /** Просмотры: всем (аноним/юзер). Антинакрутка раз в сутки на владельца. */
   async addView(
     productId: number,
     customerId: number | null,
@@ -216,12 +221,7 @@ export class CatalogService {
     await this.ds.query(
       `INSERT INTO product_view (product_id, customer_id, visitor_id, ip, user_agent)
        VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (
-         product_id,
-         date_trunc('day', created_at),
-         COALESCE(customer_id, -1),
-         COALESCE(visitor_id, '00000000-0000-0000-0000-000000000000'::uuid)
-       ) DO NOTHING`,
+       ON CONFLICT ON CONSTRAINT ux_product_view_daily_guard DO NOTHING`,
       [
         productId,
         customerId ?? null,

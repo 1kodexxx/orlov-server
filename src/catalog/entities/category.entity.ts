@@ -1,4 +1,3 @@
-// src/shop/entities/category.entity.ts
 import {
   Column,
   Entity,
@@ -9,6 +8,8 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Product } from './product.entity';
+
+export type CategoryKind = 'normal' | 'material' | 'collection' | 'popularity';
 
 @Entity({ name: 'category' })
 export class Category {
@@ -22,6 +23,9 @@ export class Category {
   @Column({ name: 'slug', type: 'varchar', length: 150, unique: true })
   slug!: string;
 
+  @Column({ name: 'kind', type: 'text', default: 'normal' })
+  kind!: CategoryKind;
+
   @ManyToOne(() => Category, (c) => c.children, { nullable: true })
   @JoinColumn({ name: 'parent_id' })
   parent?: Category | null;
@@ -32,6 +36,7 @@ export class Category {
   @Column({ name: 'created_at', type: 'timestamptz', default: () => 'now()' })
   createdAt!: Date;
 
+  // Навигационное поле, если используешь ManyToMany через join table
   @OneToMany(() => Product, (p) => p.categories)
   _productsNav?: Product[];
 }

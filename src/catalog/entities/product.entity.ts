@@ -1,4 +1,3 @@
-// src/shop/entities/product.entity.ts
 import {
   Column,
   Entity,
@@ -21,13 +20,13 @@ const numericTransformer = {
 };
 
 @Entity({ name: 'product' })
-@Index(['name', 'slug'])
+@Index(['name'])
 export class Product {
   @PrimaryGeneratedColumn({ name: 'product_id' })
   id!: number;
 
   @Column({ name: 'sku', type: 'varchar', length: 50, unique: true })
-  slug!: string; // фронту удобнее как slug
+  slug!: string; // используем как slug
 
   @Column({ name: 'name', type: 'varchar', length: 200 })
   name!: string;
@@ -44,7 +43,7 @@ export class Product {
   })
   price!: number;
 
-  @Column({ name: 'stock_quantity', type: 'int' })
+  @Column({ name: 'stock_quantity', type: 'int', default: 0 })
   stockQuantity!: number;
 
   @ManyToOne(() => PhoneModel, (m: PhoneModel) => m.products, {
