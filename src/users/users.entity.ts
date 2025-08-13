@@ -40,6 +40,13 @@ export class User {
   @Column({ name: 'avatar_url', type: 'varchar', length: 500, nullable: true })
   avatarUrl!: string | null;
 
+  @Column({
+    name: 'avatar_updated_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  avatarUpdatedAt!: Date | null;
+
   @Column({ name: 'headline', type: 'varchar', length: 200, nullable: true })
   headline!: string | null;
 
@@ -62,4 +69,16 @@ export class User {
 
   @Column({ name: 'delivery_address', type: 'text', nullable: true })
   deliveryAddress!: string | null;
+
+  // === поля, которые уже есть у тебя в БД
+  @Column({ name: 'birth_date', type: 'date', nullable: true })
+  birthDate!: string | null; // 'YYYY-MM-DD'
+
+  @Column({
+    name: 'pickup_point',
+    type: 'varchar',
+    length: 200,
+    nullable: true,
+  })
+  pickupPoint!: string | null;
 }

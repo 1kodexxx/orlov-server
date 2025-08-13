@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsOptional, IsString, MaxLength, IsDateString } from 'class-validator';
 
 export class UpdateProfileDto {
   @IsOptional()
@@ -14,25 +14,46 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsString()
   @MaxLength(20)
-  phone?: string;
+  phone?: string | null;
 
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  city?: string;
+  city?: string | null;
 
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  country?: string;
+  country?: string | null;
 
   @IsOptional()
   @IsString()
   @MaxLength(255)
-  homeAddress?: string;
+  homeAddress?: string | null;
 
   @IsOptional()
   @IsString()
   @MaxLength(255)
-  deliveryAddress?: string;
+  deliveryAddress?: string | null;
+
+  // дополнительный профиль
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  headline?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  organization?: string | null;
+
+  // уже существующие в БД поля
+  @IsOptional()
+  @IsDateString()
+  birthDate?: string | null; // формат YYYY-MM-DD
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  pickupPoint?: string | null;
 }

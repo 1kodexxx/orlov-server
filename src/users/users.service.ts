@@ -49,6 +49,10 @@ type ProfileUpdatable = DeepPartial<
     | 'city'
     | 'homeAddress'
     | 'deliveryAddress'
+    | 'headline'
+    | 'organization'
+    | 'birthDate'
+    | 'pickupPoint'
   >
 >;
 
@@ -68,6 +72,8 @@ export type CreateUserInput = Pick<
       | 'country'
       | 'homeAddress'
       | 'deliveryAddress'
+      | 'birthDate'
+      | 'pickupPoint'
     >
   >;
 
@@ -112,6 +118,10 @@ export class UsersService {
         'city',
         'homeAddress',
         'deliveryAddress',
+        'headline',
+        'organization',
+        'birthDate',
+        'pickupPoint',
       ],
     });
   }
@@ -121,7 +131,7 @@ export class UsersService {
     const entity = this.repo.create({
       email: data.email,
       passwordHash: data.passwordHash,
-      role: data.role, // <- убрали лишний каст as UserRole
+      role: data.role,
       firstName: data.firstName ?? null,
       lastName: data.lastName ?? null,
 
@@ -133,6 +143,8 @@ export class UsersService {
       country: data.country ?? null,
       homeAddress: data.homeAddress ?? null,
       deliveryAddress: data.deliveryAddress ?? null,
+      birthDate: data.birthDate ?? null,
+      pickupPoint: data.pickupPoint ?? null,
     } as DeepPartial<User>);
 
     return this.repo.save(entity);
@@ -159,6 +171,10 @@ export class UsersService {
       homeAddress: u.homeAddress ?? null,
       deliveryAddress: u.deliveryAddress ?? null,
       tokenVersion: u.tokenVersion ?? 0,
+      headline: u.headline ?? null,
+      organization: u.organization ?? null,
+      birthDate: u.birthDate ?? null,
+      pickupPoint: u.pickupPoint ?? null,
     };
   }
 
@@ -176,6 +192,10 @@ export class UsersService {
       city: dto.city ?? null,
       homeAddress: dto.homeAddress ?? null,
       deliveryAddress: dto.deliveryAddress ?? null,
+      headline: dto.headline ?? null,
+      organization: dto.organization ?? null,
+      birthDate: dto.birthDate ?? null,
+      pickupPoint: dto.pickupPoint ?? null,
     };
 
     type UpdateArg = Parameters<Repository<User>['update']>[1];
@@ -244,22 +264,24 @@ export class UsersService {
 
     // Удаляем предыдущий файл, если он был
     if (user.avatarUrl) {
-      // avatarUrl может быть "/uploads/avatars/..." или "uploads/avatars/..."
-      const relPrev = user.avatarUrl.replace(/^\/+/, ''); // <-- нормализуем
+      const relPrev = user.avatarUrl.replace(/^\/+/, '');
       const prevAbs = path.join(process.cwd(), relPrev);
       await safeUnlink(prevAbs);
     }
 
-    // Сохраняем с ВЕДУЩИМ слэшем — это важно для корректного <img src="/uploads/...">
     const relWeb = `/uploads/avatars/${outName}`;
 
     type UpdateArg = Parameters<Repository<User>['update']>[1];
-    await this.repo.update({ id: userId }, { avatarUrl: relWeb } as UpdateArg);
+    await this.repo.update({ id: userId }, {
+      avatarUrl: relWeb,
+      avatarUpdatedAt: new Date(),
+    } as UpdateArg);
 
     return { avatarUrl: relWeb };
   }
 
-  /** Мои заказы */
+  // ===== ниже без изменений (мои заказы/статы/лайки/комменты/отзывы) =====
+
   async getMyOrders(userId: number) {
     const rows = await this.raw<
       Array<{
@@ -291,7 +313,6 @@ export class UsersService {
     }));
   }
 
-  /** Моя короткая статистика */
   async getMyStats(userId: number) {
     const [row] = await this.raw<
       Array<{
@@ -388,7 +409,6 @@ export class UsersService {
     };
   }
 
-  /** Лайкнутые товары */
   async getMyLikedProducts(userId: number) {
     return this.raw<
       Array<{ id: number; name: string; price: number; image?: string | null }>
@@ -415,7 +435,6 @@ export class UsersService {
     );
   }
 
-  /** Мои комментарии к товарам */
   async getMyProductComments(userId: number) {
     return this.raw<
       Array<{
@@ -443,7 +462,6 @@ export class UsersService {
     );
   }
 
-  /** Мои отзывы о компании */
   async getMyCompanyReviews(userId: number) {
     return this.raw<
       Array<{
