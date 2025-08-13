@@ -1,3 +1,4 @@
+// src/users/users.service.ts
 import {
   Injectable,
   NotFoundException,
@@ -63,7 +64,7 @@ export class UsersService {
   private async raw<T>(sql: string, params: unknown[] = []): Promise<T[]> {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const rows = await this.repo.manager.query(sql, params);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+
     return rows as unknown as T[];
   }
 
