@@ -39,7 +39,7 @@ export class User {
   @Column({ name: 'token_version', type: 'int', default: 0 })
   tokenVersion!: number;
 
-  // ↓↓↓ Новые необязательные поля для подписи на карточке отзыва
+  // ↓↓↓ Доп.поля для подписи/карточек
   @Column({ name: 'headline', type: 'varchar', length: 200, nullable: true })
   headline!: string | null;
 
@@ -50,4 +50,17 @@ export class User {
     nullable: true,
   })
   organization!: string | null;
+
+  // ↓↓↓ Поля профиля для ЛК (миграция-добавление потребуется)
+  @Column({ name: 'city', type: 'varchar', length: 120, nullable: true })
+  city!: string | null;
+
+  @Column({ name: 'country', type: 'varchar', length: 120, nullable: true })
+  country!: string | null;
+
+  @Column({ name: 'home_address', type: 'text', nullable: true })
+  homeAddress!: string | null;
+
+  @Column({ name: 'delivery_address', type: 'text', nullable: true })
+  deliveryAddress!: string | null;
 }

@@ -16,7 +16,7 @@ import {
   UploadedFile,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { UsersService } from './users.service';
+import { UsersService, MyOrderRow, MyStats } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from '../auth/guards';
@@ -137,6 +137,22 @@ export class UsersController {
   async myCompanyReviews(@Req() req: Request) {
     const payload = req.user as JwtPayloadLike;
     return this.users.getMyCompanyReviews(payload.sub);
+  }
+
+  /** ▼▼ Добавлено для ЛК: заказы и статистика ▼▼ */
+
+  /** ЛК: мои заказы */
+  @Get('me/orders')
+  async myOrders(@Req() req: Request): Promise<MyOrderRow[]> {
+    const payload = req.user as JwtPayloadLike;
+    return this.users.getMyOrders(payload.sub);
+  }
+
+  /** ЛК: моя статистика */
+  @Get('me/stats')
+  async myStats(@Req() req: Request): Promise<MyStats> {
+    const payload = req.user as JwtPayloadLike;
+    return this.users.getMyStats(payload.sub);
   }
 
   @Delete('me')

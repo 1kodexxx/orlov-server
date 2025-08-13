@@ -15,7 +15,7 @@ import * as path from 'node:path';
 import sharp from 'sharp';
 import * as argon2 from 'argon2';
 
-/** Строка из v_product_full — достаточно полей, которые реально нужны в UI */
+/** v_product_full — строки для избранного */
 export interface VProductFullRow {
   product_id: number;
   sku: string;
@@ -33,7 +33,7 @@ export interface VProductFullRow {
   categories: string[];
 }
 
-/** Строка “мой комментарий” */
+/** Комментарий пользователя */
 export interface MyCommentRow {
   id: number; // comment_id
   text: string; // content
@@ -43,7 +43,7 @@ export interface MyCommentRow {
   productImage: string | null;
 }
 
-/** Строка “мой отзыв о компании” */
+/** Отзыв о компании */
 export interface MyCompanyReviewRow {
   id: string; // BIGINT -> string в node-pg
   rating: number;
@@ -53,19 +53,37 @@ export interface MyCompanyReviewRow {
   updatedAt: string;
 }
 
+/** Заказ для ЛК */
+export type OrderStatus = 'in_transit' | 'completed' | 'cancelled';
+export interface MyOrderRow {
+  id: string; // отрендерим как "FWBxxxxx" на фронте по желанию
+  date: string;
+  price: number;
+  status: OrderStatus;
+}
+
+/** Простая статистика для верхних карточек */
+export interface MyStats {
+  ordersMade: number;
+  ordersChangePct: number;
+  reviewsAdded: number;
+  reviewsChangePct: number;
+  favoritesAdded: number;
+  favoritesChangePct: number;
+  returns: number;
+  returnsChangePct: number;
+}
+
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User) private readonly repo: Repository<User>,
   ) {}
 
-  // --- ДОБАВЬ ЭТОТ ХЕЛПЕР НИЖЕ КОНСТРУКТОРА ИЛИ РЯДОМ С ДРУГИМИ МЕТОДАМИ ---
-  /** Безопасная обёртка над manager.query с явным generic-типом результата */
+  /** Безопасная обёртка над raw-запросом */
   private async raw<T>(sql: string, params: unknown[] = []): Promise<T[]> {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const rows = await this.repo.manager.query(sql, params);
-
-    return rows as unknown as T[];
+    const rows: unknown[] = await this.repo.manager.query(sql, params);
+    return rows as T[];
   }
 
   private baseSelect: FindOptionsSelect<User> = {
@@ -80,6 +98,10 @@ export class UsersService {
     tokenVersion: true,
     headline: true,
     organization: true,
+    city: true,
+    country: true,
+    homeAddress: true,
+    deliveryAddress: true,
   };
 
   async create(data: Partial<User>) {
@@ -260,6 +282,135 @@ export class UsersService {
         ORDER BY created_at DESC`,
       [userId],
     );
+  }
+
+  /** Мои заказы (укороченная карточка, как на фронте) */
+  async getMyOrders(userId: number): Promise<MyOrderRow[]> {
+    return this.raw<MyOrderRow>(
+      `SELECT
+         o.order_id::text   AS id,
+         to_char(o.order_date, 'YYYY-MM-DD') AS date,
+         o.total_amount::numeric(10,2)       AS price,
+         o.status::text     AS status
+       FROM orders o
+       WHERE o.customer_id = $1
+       ORDER BY o.order_date DESC
+       LIMIT 100`,
+      [userId],
+    );
+  }
+
+  /** Статистика для верхних карточек */
+  async getMyStats(userId: number): Promise<MyStats> {
+    // текущие 90 дней / предыдущие 90 дней
+    const rows = await this.raw<{
+      orders_curr: string;
+      orders_prev: string;
+      likes_curr: string;
+      likes_prev: string;
+      rev_curr: string;
+      rev_prev: string;
+      canc_curr: string;
+      canc_prev: string;
+    }>(
+      `
+      WITH
+      orders_curr AS (
+        SELECT COUNT(*)::int AS c
+        FROM orders
+        WHERE customer_id = $1 AND order_date >= now() - interval '90 days'
+      ),
+      orders_prev AS (
+        SELECT COUNT(*)::int AS c
+        FROM orders
+        WHERE customer_id = $1
+          AND order_date <  now() - interval '90 days'
+          AND order_date >= now() - interval '180 days'
+      ),
+      likes_curr AS (
+        SELECT COUNT(*)::int AS c
+        FROM product_like
+        WHERE customer_id = $1 AND liked_at >= now() - interval '90 days'
+      ),
+      likes_prev AS (
+        SELECT COUNT(*)::int AS c
+        FROM product_like
+        WHERE customer_id = $1
+          AND liked_at <  now() - interval '90 days'
+          AND liked_at >= now() - interval '180 days'
+      ),
+      rev_curr AS (
+        SELECT COUNT(*)::int AS c
+        FROM company_reviews
+        WHERE customer_id = $1 AND created_at >= now() - interval '90 days'
+      ),
+      rev_prev AS (
+        SELECT COUNT(*)::int AS c
+        FROM company_reviews
+        WHERE customer_id = $1
+          AND created_at <  now() - interval '90 days'
+          AND created_at >= now() - interval '180 days'
+      ),
+      canc_curr AS (
+        SELECT COUNT(*)::int AS c
+        FROM orders
+        WHERE customer_id = $1 AND status = 'cancelled'
+          AND order_date >= now() - interval '90 days'
+      ),
+      canc_prev AS (
+        SELECT COUNT(*)::int AS c
+        FROM orders
+        WHERE customer_id = $1 AND status = 'cancelled'
+          AND order_date <  now() - interval '90 days'
+          AND order_date >= now() - interval '180 days'
+      )
+      SELECT
+        (SELECT c FROM orders_curr) AS orders_curr,
+        (SELECT c FROM orders_prev) AS orders_prev,
+        (SELECT c FROM likes_curr)  AS likes_curr,
+        (SELECT c FROM likes_prev)  AS likes_prev,
+        (SELECT c FROM rev_curr)    AS rev_curr,
+        (SELECT c FROM rev_prev)    AS rev_prev,
+        (SELECT c FROM canc_curr)   AS canc_curr,
+        (SELECT c FROM canc_prev)   AS canc_prev
+      `,
+      [userId],
+    );
+
+    const one = rows[0] ?? {
+      orders_curr: '0',
+      orders_prev: '0',
+      likes_curr: '0',
+      likes_prev: '0',
+      rev_curr: '0',
+      rev_prev: '0',
+      canc_curr: '0',
+      canc_prev: '0',
+    };
+
+    const n = (s: string) => Number(s) || 0;
+    const pct = (curr: number, prev: number) =>
+      Math.round(((curr - prev) / Math.max(prev, 1)) * 100);
+
+    const ordersCurr = n(one.orders_curr);
+    const ordersPrev = n(one.orders_prev);
+    const favCurr = n(one.likes_curr);
+    const favPrev = n(one.likes_prev);
+    const revCurr = n(one.rev_curr);
+    const revPrev = n(one.rev_prev);
+    const cancCurr = n(one.canc_curr);
+    const cancPrev = n(one.canc_prev);
+
+    return {
+      ordersMade: ordersCurr,
+      ordersChangePct: pct(ordersCurr, ordersPrev),
+      reviewsAdded: revCurr,
+      reviewsChangePct: pct(revCurr, revPrev),
+      favoritesAdded: favCurr,
+      favoritesChangePct: pct(favCurr, favPrev),
+      returns: cancCurr,
+      returnsChangePct: pct(cancCurr, cancPrev),
+    };
   }
 }
 
