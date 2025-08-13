@@ -1,11 +1,7 @@
-// src/app.module.ts
 import { Module, Logger, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
-
-import { ServeStaticModule } from '@nestjs/serve-static';
-import { join } from 'path';
 
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
@@ -16,17 +12,10 @@ import { VisitorIdMiddleware } from './common/visitor/visitor-id.middleware';
 
 @Module({
   imports: [
-    // раздаём uploads по /static
-    ServeStaticModule.forRoot({
-      rootPath: join(process.cwd(), 'uploads'),
-      serveRoot: '/static',
-      serveStaticOptions: { index: false, fallthrough: false },
-    }),
-
     ViewsModule,
     UsersModule,
     CatalogModule,
-    FavoritesModule, // ⬅ добавили модуль «Избранное»
+    FavoritesModule,
     AuthModule,
 
     ConfigModule.forRoot({ isGlobal: true }),
@@ -59,7 +48,6 @@ export class AppModule implements NestModule {
   }
 
   configure(consumer: MiddlewareConsumer) {
-    // выдаём/читаем visitorId для лайков/просмотров и публичного избранного
     consumer.apply(VisitorIdMiddleware).forRoutes('catalog', 'favorites');
   }
 }

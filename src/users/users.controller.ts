@@ -45,7 +45,7 @@ export class UsersController {
   @Get('me')
   async me(@Req() req: Request) {
     const payload = req.user as JwtPayload;
-    const u = await this.users.findById(payload.sub);
+    const u = await this.users.getPublicProfile(payload.sub);
     if (!u) throw new NotFoundException('User not found');
     return u;
   }
@@ -113,38 +113,34 @@ export class UsersController {
       payload.sub,
       file.path,
     );
-    return { avatarUrl };
+    const profile = await this.users.getPublicProfile(payload.sub);
+    return { avatarUrl, user: profile };
   }
 
-  /** ЛК: мои лайки */
   @Get('me/likes')
   async myLikes(@Req() req: Request) {
     const payload = req.user as JwtPayload;
     return this.users.getMyLikedProducts(payload.sub);
   }
 
-  /** ЛК: мои комментарии */
   @Get('me/comments')
   async myComments(@Req() req: Request) {
     const payload = req.user as JwtPayload;
     return this.users.getMyProductComments(payload.sub);
   }
 
-  /** ЛК: мои отзывы о компании */
   @Get('me/company-reviews')
   async myCompanyReviews(@Req() req: Request) {
     const payload = req.user as JwtPayload;
     return this.users.getMyCompanyReviews(payload.sub);
   }
 
-  /** ЛК: мои заказы */
   @Get('me/orders')
   async myOrders(@Req() req: Request) {
     const payload = req.user as JwtPayload;
     return this.users.getMyOrders(payload.sub);
   }
 
-  /** ЛК: статистика */
   @Get('me/stats')
   async myStats(@Req() req: Request) {
     const payload = req.user as JwtPayload;

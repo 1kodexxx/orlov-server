@@ -1,4 +1,3 @@
-// src/main.ts
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import {
@@ -11,41 +10,44 @@ import { Reflector } from '@nestjs/core';
 import helmet, { type HelmetOptions } from 'helmet';
 import cookieParser, { type CookieParseOptions } from 'cookie-parser';
 import type { RequestHandler } from 'express';
-
+import * as express from 'express';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'node:path';
 
 async function bootstrap() {
-  // Используем Express-вариант приложения, чтобы раздавать статику
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     cors: false,
   });
   const logger = new Logger('Bootstrap');
 
-  // Убираем заголовок Express корректно (без лишних утверждений типов)
   const http = app.getHttpAdapter().getInstance();
   http.disable('x-powered-by');
 
-  // 1) Helmet (явные типы, чтобы не было "unsafe call")
+  // 1) Helmet — разрешаем картинки и ресурсы кросс-оригин (полезно в деве)
   const asHelmet: (opts?: HelmetOptions) => RequestHandler =
     helmet as unknown as (opts?: HelmetOptions) => RequestHandler;
 
   const helmetOptions: HelmetOptions = {
-    crossOriginResourcePolicy: { policy: 'same-site' },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        // Разрешаем изображения с нашего сервера + data:/blob:
+        'img-src': ["'self'", 'data:', 'blob:', 'http:', 'https:'],
+      },
+    },
   };
   app.use(asHelmet(helmetOptions));
 
-  // 2) Строгий CORS (типизируем колбэк)
+  // 2) CORS (белый список через CORS_ORIGINS, в деве добавь http://localhost:5173)
   const allowlist = (process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
 
   app.enableCors({
-    origin(
-      origin: string | undefined,
-      cb: (err: Error | null, allow?: boolean) => void,
-    ) {
+    origin(origin, cb) {
       if (!origin || allowlist.includes(origin)) return cb(null, true);
       return cb(new Error('Not allowed by CORS'), false);
     },
@@ -54,7 +56,7 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  // 3) Cookie (также типизирован вызов)
+  // 3) Cookie parser
   const asCookieParser: (
     secret?: string,
     options?: CookieParseOptions,
@@ -62,14 +64,17 @@ async function bootstrap() {
     secret?: string,
     options?: CookieParseOptions,
   ) => RequestHandler;
+  app.use(asCookieParser(String(process.env.COOKIE_SECRET ?? '')));
 
-  const cookieSecret = String(process.env.COOKIE_SECRET ?? '');
-  app.use(asCookieParser(cookieSecret));
-
-  // 4) Раздача файлов из ./uploads по адресу /uploads/**
-  app.useStaticAssets(join(process.cwd(), 'uploads'), {
-    prefix: '/uploads',
-  });
+  // 4) Явная раздача /uploads (без дублирования через ServeStaticModule)
+  app.use(
+    '/uploads',
+    express.static(join(process.cwd(), 'uploads'), {
+      index: false,
+      immutable: true,
+      maxAge: '7d',
+    }),
+  );
 
   // 5) Глобальные пайпы/интерцепторы
   app.useGlobalPipes(
@@ -88,7 +93,6 @@ async function bootstrap() {
 
 bootstrap().catch(() => {
   const logger = new Logger('Bootstrap');
-  // не палим детали в stdout; при необходимости можно отправить в APM/логгер
   logger.error('❌ Критическая ошибка запуска');
   process.exit(1);
 });

@@ -242,20 +242,21 @@ export class UsersService {
         void safeUnlink(srcPath);
       });
 
+    // Удаляем предыдущий файл, если он был
     if (user.avatarUrl) {
-      const prevAbs = path.isAbsolute(user.avatarUrl)
-        ? user.avatarUrl
-        : path.join(process.cwd(), user.avatarUrl);
+      // avatarUrl может быть "/uploads/avatars/..." или "uploads/avatars/..."
+      const relPrev = user.avatarUrl.replace(/^\/+/, ''); // <-- нормализуем
+      const prevAbs = path.join(process.cwd(), relPrev);
       await safeUnlink(prevAbs);
     }
 
-    const rel = outPath
-      .replace(process.cwd() + path.sep, '')
-      .replace(/\\/g, '/');
-    type UpdateArg = Parameters<Repository<User>['update']>[1];
-    await this.repo.update({ id: userId }, { avatarUrl: rel } as UpdateArg);
+    // Сохраняем с ВЕДУЩИМ слэшем — это важно для корректного <img src="/uploads/...">
+    const relWeb = `/uploads/avatars/${outName}`;
 
-    return { avatarUrl: rel };
+    type UpdateArg = Parameters<Repository<User>['update']>[1];
+    await this.repo.update({ id: userId }, { avatarUrl: relWeb } as UpdateArg);
+
+    return { avatarUrl: relWeb };
   }
 
   /** Мои заказы */
