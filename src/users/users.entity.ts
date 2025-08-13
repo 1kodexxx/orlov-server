@@ -1,4 +1,3 @@
-// src/users/users.entity.ts
 import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 export type UserRole = 'admin' | 'manager' | 'customer';
@@ -8,17 +7,15 @@ export class User {
   @PrimaryGeneratedColumn({ name: 'customer_id' })
   id!: number;
 
-  @Column({ name: 'first_name', type: 'varchar', length: 100 })
-  firstName!: string;
-
-  @Column({ name: 'last_name', type: 'varchar', length: 100 })
-  lastName!: string;
-
+  // === базовые поля
   @Column({ type: 'varchar', length: 255, unique: true })
   email!: string;
 
-  @Column({ type: 'varchar', length: 20, nullable: true })
-  phone!: string | null;
+  @Column({ name: 'password_hash', type: 'text', select: false })
+  passwordHash!: string;
+
+  @Column({ type: 'varchar', length: 20, default: 'customer' })
+  role!: UserRole;
 
   @Column({
     name: 'registered_at',
@@ -27,19 +24,22 @@ export class User {
   })
   registeredAt!: Date;
 
-  @Column({ name: 'password_hash', type: 'text', select: false })
-  passwordHash!: string;
-
-  @Column({ type: 'varchar', length: 20, default: 'customer' })
-  role!: UserRole;
-
-  @Column({ name: 'avatar_url', type: 'varchar', nullable: true })
-  avatarUrl!: string | null;
-
   @Column({ name: 'token_version', type: 'int', default: 0 })
   tokenVersion!: number;
 
-  // ↓↓↓ Доп.поля для подписи/карточек
+  // === профиль (всё — nullable, т.к. пользователь может не заполнять)
+  @Column({ name: 'first_name', type: 'varchar', length: 100, nullable: true })
+  firstName!: string | null;
+
+  @Column({ name: 'last_name', type: 'varchar', length: 100, nullable: true })
+  lastName!: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  phone!: string | null;
+
+  @Column({ name: 'avatar_url', type: 'varchar', length: 500, nullable: true })
+  avatarUrl!: string | null;
+
   @Column({ name: 'headline', type: 'varchar', length: 200, nullable: true })
   headline!: string | null;
 
@@ -51,7 +51,6 @@ export class User {
   })
   organization!: string | null;
 
-  // ↓↓↓ Поля профиля для ЛК (миграция-добавление потребуется)
   @Column({ name: 'city', type: 'varchar', length: 120, nullable: true })
   city!: string | null;
 

@@ -10,14 +10,21 @@ import { Reflector } from '@nestjs/core';
 
 import helmet, { type HelmetOptions } from 'helmet';
 import cookieParser, { type CookieParseOptions } from 'cookie-parser';
-import type { Express, RequestHandler } from 'express';
+import type { RequestHandler } from 'express';
+
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'node:path';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { cors: false });
+  // Используем Express-вариант приложения, чтобы раздавать статику
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    cors: false,
+  });
   const logger = new Logger('Bootstrap');
 
-  // Убираем заголовок Express корректно
-  (app.getHttpAdapter().getInstance() as Express).disable('x-powered-by');
+  // Убираем заголовок Express корректно (без лишних утверждений типов)
+  const http = app.getHttpAdapter().getInstance();
+  http.disable('x-powered-by');
 
   // 1) Helmet (явные типы, чтобы не было "unsafe call")
   const asHelmet: (opts?: HelmetOptions) => RequestHandler =
@@ -59,7 +66,12 @@ async function bootstrap() {
   const cookieSecret = String(process.env.COOKIE_SECRET ?? '');
   app.use(asCookieParser(cookieSecret));
 
-  // 4) Глобальные пайпы/интерцепторы
+  // 4) Раздача файлов из ./uploads по адресу /uploads/**
+  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+    prefix: '/uploads',
+  });
+
+  // 5) Глобальные пайпы/интерцепторы
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,

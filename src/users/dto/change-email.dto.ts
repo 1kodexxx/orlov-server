@@ -1,7 +1,7 @@
-// src/users/dto/change-email.dto.ts
-import { IsEmail } from 'class-validator';
+import { IsEmail, MaxLength } from 'class-validator';
 
 export class ChangeEmailDto {
   @IsEmail()
+  @MaxLength(255)
   email!: string;
 }

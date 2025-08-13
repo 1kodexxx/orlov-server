@@ -1,44 +1,38 @@
-// src/users/dto/update-profile.dto.ts
-import { IsOptional, IsString, Length, MaxLength } from 'class-validator';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class UpdateProfileDto {
   @IsOptional()
   @IsString()
-  @Length(1, 100)
+  @MaxLength(100)
   firstName?: string;
 
   @IsOptional()
   @IsString()
-  @Length(1, 100)
+  @MaxLength(100)
   lastName?: string;
 
   @IsOptional()
   @IsString()
-  @Length(5, 20)
-  phone?: string | null;
+  @MaxLength(20)
+  phone?: string;
 
   @IsOptional()
   @IsString()
-  @Length(1, 120)
-  city?: string | null;
+  @MaxLength(100)
+  city?: string;
 
   @IsOptional()
   @IsString()
-  @Length(1, 120)
-  country?: string | null;
+  @MaxLength(100)
+  country?: string;
 
   @IsOptional()
   @IsString()
-  @MaxLength(500)
-  homeAddress?: string | null;
+  @MaxLength(255)
+  homeAddress?: string;
 
   @IsOptional()
   @IsString()
-  @MaxLength(500)
-  deliveryAddress?: string | null;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  avatarUrl?: string;
+  @MaxLength(255)
+  deliveryAddress?: string;
 }

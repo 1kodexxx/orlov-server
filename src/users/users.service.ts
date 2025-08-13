@@ -1,78 +1,75 @@
-// src/users/users.service.ts
 import {
+  ConflictException,
   Injectable,
   NotFoundException,
-  BadRequestException,
-  ConflictException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, FindOptionsSelect } from 'typeorm';
-import { User } from './users.entity';
-import { UpdateProfileDto } from './dto/update-profile.dto';
-
-import * as fs from 'node:fs/promises';
+import { DeepPartial, Repository } from 'typeorm';
 import * as path from 'node:path';
+import * as fs from 'node:fs/promises';
 import sharp from 'sharp';
-import * as argon2 from 'argon2';
 
-/** v_product_full — строки для избранного */
-export interface VProductFullRow {
-  product_id: number;
-  sku: string;
-  name: string;
-  description: string | null;
-  price: number;
-  stock_quantity: number;
-  phone_model_id: number;
-  view_count: number;
-  like_count: number;
-  avg_rating: number;
-  created_at: string;
-  updated_at: string;
-  images: Array<{ url: string; position: number }>;
-  categories: string[];
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { User } from './users.entity';
+
+/** надёжный unlink с ретраями — лечит EBUSY/EPERM на Windows */
+async function safeUnlink(
+  p: string,
+  retries = 5,
+  delayMs = 120,
+): Promise<void> {
+  for (let i = 0; i <= retries; i += 1) {
+    try {
+      await fs.unlink(p);
+      return;
+    } catch (err) {
+      const code = (err as { code?: unknown })?.code;
+      const codeStr = typeof code === 'string' ? code : undefined;
+
+      if (i === retries) return;
+      if (codeStr === 'EBUSY' || codeStr === 'EPERM') {
+        await new Promise((r) => setTimeout(r, delayMs));
+        continue;
+      }
+      if (codeStr === 'ENOENT') return;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
 }
 
-/** Комментарий пользователя */
-export interface MyCommentRow {
-  id: number; // comment_id
-  text: string; // content
-  createdAt: string; // created_at
-  product_id: number;
-  productName: string;
-  productImage: string | null;
-}
+/** Что можно обновлять в профиле */
+type ProfileUpdatable = DeepPartial<
+  Pick<
+    User,
+    | 'firstName'
+    | 'lastName'
+    | 'phone'
+    | 'country'
+    | 'city'
+    | 'homeAddress'
+    | 'deliveryAddress'
+  >
+>;
 
-/** Отзыв о компании */
-export interface MyCompanyReviewRow {
-  id: string; // BIGINT -> string в node-pg
-  rating: number;
-  text: string;
-  isApproved: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** Заказ для ЛК */
-export type OrderStatus = 'in_transit' | 'completed' | 'cancelled';
-export interface MyOrderRow {
-  id: string; // отрендерим как "FWBxxxxx" на фронте по желанию
-  date: string;
-  price: number;
-  status: OrderStatus;
-}
-
-/** Простая статистика для верхних карточек */
-export interface MyStats {
-  ordersMade: number;
-  ordersChangePct: number;
-  reviewsAdded: number;
-  reviewsChangePct: number;
-  favoritesAdded: number;
-  favoritesChangePct: number;
-  returns: number;
-  returnsChangePct: number;
-}
+/** Параметры для создания пользователя (используется auth.service) */
+export type CreateUserInput = Pick<
+  User,
+  'email' | 'passwordHash' | 'role' | 'firstName' | 'lastName'
+> &
+  DeepPartial<
+    Pick<
+      User,
+      | 'avatarUrl'
+      | 'phone'
+      | 'headline'
+      | 'organization'
+      | 'city'
+      | 'country'
+      | 'homeAddress'
+      | 'deliveryAddress'
+    >
+  >;
 
 @Injectable()
 export class UsersService {
@@ -80,239 +77,233 @@ export class UsersService {
     @InjectRepository(User) private readonly repo: Repository<User>,
   ) {}
 
-  /** Безопасная обёртка над raw-запросом */
-  private async raw<T>(sql: string, params: unknown[] = []): Promise<T[]> {
-    const rows: unknown[] = await this.repo.manager.query(sql, params);
-    return rows as T[];
+  /** безопасная обёртка над manager.query без any */
+  private async raw<T>(sql: string, params: unknown[] = []): Promise<T> {
+    const resUnknown: unknown = await this.repo.manager.query(sql, params);
+    return resUnknown as T;
   }
 
-  private baseSelect: FindOptionsSelect<User> = {
-    id: true,
-    email: true,
-    role: true,
-    firstName: true,
-    lastName: true,
-    phone: true,
-    registeredAt: true,
-    avatarUrl: true,
-    tokenVersion: true,
-    headline: true,
-    organization: true,
-    city: true,
-    country: true,
-    homeAddress: true,
-    deliveryAddress: true,
-  };
+  // -------------------------------------------------
+  // БАЗОВЫЕ МЕТОДЫ (для auth.module)
+  // -------------------------------------------------
 
-  async create(data: Partial<User>) {
-    const entity = this.repo.create(data);
-    return this.repo.save(entity);
+  async findById(id: number): Promise<User | null> {
+    return this.repo.findOne({ where: { id } });
   }
 
-  async findById(id: number) {
-    return this.repo.findOne({ where: { id }, select: this.baseSelect });
+  async findByEmail(email: string): Promise<User | null> {
+    return this.repo.findOne({ where: { email } });
   }
 
-  async findByEmail(email: string) {
-    return this.repo.findOne({ where: { email }, select: this.baseSelect });
-  }
-
-  async findByEmailWithPassword(email: string) {
+  async findByEmailWithPassword(email: string): Promise<User | null> {
     return this.repo.findOne({
       where: { email },
-      select: { ...this.baseSelect, passwordHash: true },
+      select: [
+        'id',
+        'email',
+        'passwordHash',
+        'role',
+        'tokenVersion',
+        'firstName',
+        'lastName',
+        'avatarUrl',
+        'phone',
+        'country',
+        'city',
+        'homeAddress',
+        'deliveryAddress',
+      ],
     });
   }
 
-  async updateAvatar(userId: number, avatarUrl: string): Promise<void> {
-    await this.repo.update({ id: userId }, { avatarUrl });
-  }
+  /** Создать пользователя */
+  async create(data: CreateUserInput): Promise<User> {
+    const entity = this.repo.create({
+      email: data.email,
+      passwordHash: data.passwordHash,
+      role: data.role, // <- убрали лишний каст as UserRole
+      firstName: data.firstName ?? null,
+      lastName: data.lastName ?? null,
 
-  async updateProfile(userId: number, dto: UpdateProfileDto) {
-    await this.repo.update({ id: userId }, dto);
-    return this.findById(userId);
-  }
+      avatarUrl: data.avatarUrl ?? null,
+      phone: data.phone ?? null,
+      headline: data.headline ?? null,
+      organization: data.organization ?? null,
+      city: data.city ?? null,
+      country: data.country ?? null,
+      homeAddress: data.homeAddress ?? null,
+      deliveryAddress: data.deliveryAddress ?? null,
+    } as DeepPartial<User>);
 
-  /** Смена email с проверкой уникальности + инвалидация токенов */
-  async changeEmail(userId: number, newEmail: string) {
-    const exists = await this.repo.findOne({
-      where: { email: newEmail },
-      select: { id: true },
-    });
-    if (exists && exists.id !== userId) {
-      throw new ConflictException('Email already in use');
-    }
-    await this.repo.update({ id: userId }, { email: newEmail });
-    await this.incrementTokenVersion(userId);
-    return this.findById(userId);
+    return this.repo.save(entity);
   }
 
   async incrementTokenVersion(userId: number): Promise<void> {
     await this.repo.increment({ id: userId }, 'tokenVersion', 1);
   }
 
-  async changePassword(
-    userId: number,
-    current: string,
-    next: string,
-  ): Promise<void> {
-    if (current === next) {
-      throw new BadRequestException(
-        'New password must be different from current password',
-      );
+  /** Публичная часть профиля */
+  async getPublicProfile(userId: number) {
+    const u = await this.repo.findOne({ where: { id: userId } });
+    if (!u) return null;
+    return {
+      id: u.id,
+      email: u.email,
+      role: u.role,
+      firstName: u.firstName ?? null,
+      lastName: u.lastName ?? null,
+      avatarUrl: u.avatarUrl ?? null,
+      phone: u.phone ?? null,
+      country: u.country ?? null,
+      city: u.city ?? null,
+      homeAddress: u.homeAddress ?? null,
+      deliveryAddress: u.deliveryAddress ?? null,
+      tokenVersion: u.tokenVersion ?? 0,
+    };
+  }
+
+  // -------------------------------------------------
+  // Личный кабинет
+  // -------------------------------------------------
+
+  /** Обновление анкеты в ЛК */
+  async updateProfile(userId: number, dto: UpdateProfileDto) {
+    const data: ProfileUpdatable = {
+      firstName: dto.firstName ?? null,
+      lastName: dto.lastName ?? null,
+      phone: dto.phone ?? null,
+      country: dto.country ?? null,
+      city: dto.city ?? null,
+      homeAddress: dto.homeAddress ?? null,
+      deliveryAddress: dto.deliveryAddress ?? null,
+    };
+
+    type UpdateArg = Parameters<Repository<User>['update']>[1];
+    await this.repo.update({ id: userId }, data as UpdateArg);
+
+    return this.getPublicProfile(userId);
+  }
+
+  /** Смена e-mail с проверкой уникальности */
+  async changeEmail(userId: number, email: string) {
+    const exists = await this.repo.findOne({
+      where: { email },
+      select: ['id'],
+    });
+    if (exists && exists.id !== userId) {
+      throw new ConflictException('E-mail уже используется');
+    }
+    await this.repo.update({ id: userId }, { email });
+    return { email };
+  }
+
+  /** Смена пароля (argon2) */
+  async changePassword(userId: number, current: string, next: string) {
+    if (!next || next.length < 6) {
+      throw new UnauthorizedException('Новый пароль слишком короткий');
     }
 
     const user = await this.repo.findOne({
       where: { id: userId },
-      select: {
-        id: true,
-        passwordHash: true,
-        tokenVersion: true,
-      },
+      select: ['id', 'passwordHash'],
     });
+    if (!user) throw new NotFoundException('Пользователь не найден');
+
+    const ok = await import('argon2').then((m) =>
+      m.verify(user.passwordHash, current),
+    );
+    if (!ok) throw new UnauthorizedException('Текущий пароль неверный');
+
+    const hashed = await import('argon2').then((m) => m.hash(next));
+    type UpdateArg = Parameters<Repository<User>['update']>[1];
+    await this.repo.update({ id: userId }, {
+      passwordHash: hashed,
+    } as UpdateArg);
+
+    return { ok: true };
+  }
+
+  /** Загрузка/сжатие и установка аватара */
+  async processAndSetAvatar(userId: number, srcPath: string) {
+    const user = await this.repo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    const ok = await argon2.verify(user.passwordHash, current);
-    if (!ok) throw new BadRequestException('Current password is incorrect');
+    const outDir = path.join(process.cwd(), 'uploads', 'avatars');
+    await fs.mkdir(outDir, { recursive: true });
 
-    const newHash = await argon2.hash(next, { type: argon2.argon2id });
-    await this.repo.update({ id: userId }, { passwordHash: newHash });
+    const outName = `u${userId}-${Date.now()}.webp`;
+    const outPath = path.join(outDir, outName);
 
-    await this.repo.increment({ id: userId }, 'tokenVersion', 1);
-  }
+    await sharp(srcPath)
+      .resize(256, 256, { fit: 'cover' })
+      .webp({ quality: 86 })
+      .toFile(outPath)
+      .finally(() => {
+        void safeUnlink(srcPath);
+      });
 
-  async deleteById(id: number): Promise<void> {
-    const user = await this.repo.findOne({ where: { id } });
-    if (user?.avatarUrl?.startsWith('/static/avatars/')) {
-      const uploadsRoot = path.join(process.cwd(), 'uploads');
-      const oldFs = path.join(
-        uploadsRoot,
-        user.avatarUrl.replace('/static/', ''),
-      );
-      await safeUnlink(oldFs);
-    }
-    await this.repo.delete({ id });
-  }
-
-  /** Resize 256×256, webp, удаление старого файла, сохранение avatarUrl */
-  async processAndSetAvatar(
-    userId: number,
-    tempPath: string,
-  ): Promise<{ avatarUrl: string }> {
-    const user = await this.repo.findOne({ where: { id: userId } });
-    if (!user) {
-      await safeUnlink(tempPath);
-      throw new NotFoundException('User not found');
+    if (user.avatarUrl) {
+      const prevAbs = path.isAbsolute(user.avatarUrl)
+        ? user.avatarUrl
+        : path.join(process.cwd(), user.avatarUrl);
+      await safeUnlink(prevAbs);
     }
 
-    const uploadsRoot = path.join(process.cwd(), 'uploads');
-    const avatarsDir = path.join(uploadsRoot, 'avatars');
-    await fs.mkdir(avatarsDir, { recursive: true });
+    const rel = outPath
+      .replace(process.cwd() + path.sep, '')
+      .replace(/\\/g, '/');
+    type UpdateArg = Parameters<Repository<User>['update']>[1];
+    await this.repo.update({ id: userId }, { avatarUrl: rel } as UpdateArg);
 
-    const filename = `u${userId}-${Date.now()}.webp`;
-    const finalFsPath = path.join(avatarsDir, filename);
-    const finalUrl = `/static/avatars/${filename}`;
-
-    try {
-      await sharp(tempPath)
-        .rotate()
-        .resize(256, 256, { fit: 'cover', position: 'attention' })
-        .webp({ quality: 85 })
-        .toFile(finalFsPath);
-    } finally {
-      await safeUnlink(tempPath);
-    }
-
-    if (user.avatarUrl?.startsWith('/static/avatars/')) {
-      const oldFs = path.join(
-        uploadsRoot,
-        user.avatarUrl.replace('/static/', ''),
-      );
-      await safeUnlink(oldFs);
-    }
-
-    user.avatarUrl = finalUrl;
-    await this.repo.save(user);
-
-    return { avatarUrl: finalUrl };
+    return { avatarUrl: rel };
   }
 
-  /* ----------------- Личный кабинет: выборки ----------------- */
-
-  /** Все товары, которые пользователь лайкнул */
-  async getMyLikedProducts(userId: number): Promise<VProductFullRow[]> {
-    return this.raw<VProductFullRow>(
-      `SELECT vp.*
-         FROM product_like pl
-         JOIN v_product_full vp ON vp.product_id = pl.product_id
-        WHERE pl.customer_id = $1
-        ORDER BY vp.created_at DESC`,
+  /** Мои заказы */
+  async getMyOrders(userId: number) {
+    const rows = await this.raw<
+      Array<{
+        id: string;
+        date: string;
+        price: string | number;
+        status: string;
+      }>
+    >(
+      `
+      SELECT
+        o.order_id::text   AS id,
+        to_char(o.order_date, 'YYYY-MM-DD') AS date,
+        o.total_amount::numeric(10,2)       AS price,
+        o.status::text     AS status
+      FROM orders o
+      WHERE o.customer_id = $1
+      ORDER BY o.order_date DESC
+      LIMIT 100
+      `,
       [userId],
     );
+
+    return rows.map((r) => ({
+      id: r.id,
+      date: r.date,
+      price: Number(r.price),
+      status: r.status,
+    }));
   }
 
-  /** Все мои комментарии к товарам + базовая инфа о товаре */
-  async getMyProductComments(userId: number): Promise<MyCommentRow[]> {
-    return this.raw<MyCommentRow>(
-      `SELECT c.comment_id AS id,
-              c.content     AS text,
-              c.created_at  AS "createdAt",
-              vp.product_id,
-              vp.name       AS "productName",
-              (vp.images->0->>'url') AS "productImage"
-         FROM comment c
-         JOIN v_product_full vp ON vp.product_id = c.product_id
-        WHERE c.customer_id = $1
-        ORDER BY c.created_at DESC`,
-      [userId],
-    );
-  }
-
-  /** Все мои отзывы о компании (полные карточки) */
-  async getMyCompanyReviews(userId: number): Promise<MyCompanyReviewRow[]> {
-    return this.raw<MyCompanyReviewRow>(
-      `SELECT id,
-              rating,
-              text,
-              is_approved AS "isApproved",
-              created_at  AS "createdAt",
-              updated_at  AS "updatedAt"
-         FROM company_reviews
-        WHERE customer_id = $1
-        ORDER BY created_at DESC`,
-      [userId],
-    );
-  }
-
-  /** Мои заказы (укороченная карточка, как на фронте) */
-  async getMyOrders(userId: number): Promise<MyOrderRow[]> {
-    return this.raw<MyOrderRow>(
-      `SELECT
-         o.order_id::text   AS id,
-         to_char(o.order_date, 'YYYY-MM-DD') AS date,
-         o.total_amount::numeric(10,2)       AS price,
-         o.status::text     AS status
-       FROM orders o
-       WHERE o.customer_id = $1
-       ORDER BY o.order_date DESC
-       LIMIT 100`,
-      [userId],
-    );
-  }
-
-  /** Статистика для верхних карточек */
-  async getMyStats(userId: number): Promise<MyStats> {
-    // текущие 90 дней / предыдущие 90 дней
-    const rows = await this.raw<{
-      orders_curr: string;
-      orders_prev: string;
-      likes_curr: string;
-      likes_prev: string;
-      rev_curr: string;
-      rev_prev: string;
-      canc_curr: string;
-      canc_prev: string;
-    }>(
+  /** Моя короткая статистика */
+  async getMyStats(userId: number) {
+    const [row] = await this.raw<
+      Array<{
+        orders_curr: number;
+        orders_prev: number;
+        likes_curr: number;
+        likes_prev: number;
+        rev_curr: number;
+        rev_prev: number;
+        canc_curr: number;
+        canc_prev: number;
+      }>
+    >(
       `
       WITH
       orders_curr AS (
@@ -377,54 +368,108 @@ export class UsersService {
       [userId],
     );
 
-    const one = rows[0] ?? {
-      orders_curr: '0',
-      orders_prev: '0',
-      likes_curr: '0',
-      likes_prev: '0',
-      rev_curr: '0',
-      rev_prev: '0',
-      canc_curr: '0',
-      canc_prev: '0',
-    };
-
-    const n = (s: string) => Number(s) || 0;
     const pct = (curr: number, prev: number) =>
-      Math.round(((curr - prev) / Math.max(prev, 1)) * 100);
-
-    const ordersCurr = n(one.orders_curr);
-    const ordersPrev = n(one.orders_prev);
-    const favCurr = n(one.likes_curr);
-    const favPrev = n(one.likes_prev);
-    const revCurr = n(one.rev_curr);
-    const revPrev = n(one.rev_prev);
-    const cancCurr = n(one.canc_curr);
-    const cancPrev = n(one.canc_prev);
+      prev === 0
+        ? curr > 0
+          ? 100
+          : 0
+        : Number((((curr - prev) / prev) * 100).toFixed(1));
 
     return {
-      ordersMade: ordersCurr,
-      ordersChangePct: pct(ordersCurr, ordersPrev),
-      reviewsAdded: revCurr,
-      reviewsChangePct: pct(revCurr, revPrev),
-      favoritesAdded: favCurr,
-      favoritesChangePct: pct(favCurr, favPrev),
-      returns: cancCurr,
-      returnsChangePct: pct(cancCurr, cancPrev),
+      ordersMade: row.orders_curr,
+      ordersChangePct: pct(row.orders_curr, row.orders_prev),
+      favoritesAdded: row.likes_curr,
+      favoritesChangePct: pct(row.likes_curr, row.likes_prev),
+      reviewsAdded: row.rev_curr,
+      reviewsChangePct: pct(row.rev_curr, row.rev_prev),
+      returns: row.canc_curr,
+      returnsChangePct: pct(row.canc_curr, row.canc_prev),
     };
   }
-}
 
-/* ----------------- helpers ----------------- */
-function isErrnoException(e: unknown): e is NodeJS.ErrnoException {
-  return typeof e === 'object' && e !== null && 'code' in e;
-}
+  /** Лайкнутые товары */
+  async getMyLikedProducts(userId: number) {
+    return this.raw<
+      Array<{ id: number; name: string; price: number; image?: string | null }>
+    >(
+      `
+      SELECT
+        p.product_id AS id,
+        p.name,
+        p.price::numeric(10,2) AS price,
+        (
+          SELECT url
+          FROM product_image i
+          WHERE i.product_id = p.product_id
+          ORDER BY position
+          LIMIT 1
+        ) AS image
+      FROM product_like l
+      JOIN product p ON p.product_id = l.product_id
+      WHERE l.customer_id = $1
+      ORDER BY l.liked_at DESC
+      LIMIT 100
+      `,
+      [userId],
+    );
+  }
 
-async function safeUnlink(p?: string | null) {
-  if (!p) return;
-  try {
-    await fs.unlink(p);
-  } catch (e) {
-    if (isErrnoException(e) && e.code === 'ENOENT') return;
-    throw e;
+  /** Мои комментарии к товарам */
+  async getMyProductComments(userId: number) {
+    return this.raw<
+      Array<{
+        id: number;
+        productId: number;
+        productName: string;
+        text: string;
+        createdAt: string;
+      }>
+    >(
+      `
+      SELECT
+        c.comment_id AS id,
+        c.product_id AS "productId",
+        p.name       AS "productName",
+        c.content    AS text,
+        to_char(c.created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "createdAt"
+      FROM comment c
+      JOIN product p ON p.product_id = c.product_id
+      WHERE c.customer_id = $1
+      ORDER BY c.created_at DESC
+      LIMIT 200
+      `,
+      [userId],
+    );
+  }
+
+  /** Мои отзывы о компании */
+  async getMyCompanyReviews(userId: number) {
+    return this.raw<
+      Array<{
+        id: number;
+        rating: number;
+        text: string;
+        createdAt: string;
+        isApproved: boolean;
+      }>
+    >(
+      `
+      SELECT
+        id,
+        rating,
+        text,
+        to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "createdAt",
+        is_approved AS "isApproved"
+      FROM company_reviews
+      WHERE customer_id = $1
+      ORDER BY created_at DESC
+      LIMIT 200
+      `,
+      [userId],
+    );
+  }
+
+  async deleteById(id: number) {
+    await this.repo.delete({ id });
   }
 }

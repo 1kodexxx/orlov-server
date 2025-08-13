@@ -1,34 +1,33 @@
-// src/users/users.controller.ts
 import {
-  Controller,
-  Get,
-  Patch,
-  Delete,
-  Param,
-  Body,
-  UseGuards,
-  Req,
-  ForbiddenException,
-  ParseIntPipe,
-  NotFoundException,
   BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  ForbiddenException,
+  Get,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Req,
+  UseGuards,
   UseInterceptors,
   UploadedFile,
+  NotFoundException,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { UsersService, MyOrderRow, MyStats } from './users.service';
-import { UpdateProfileDto } from './dto/update-profile.dto';
-import { ChangePasswordDto } from './dto/change-password.dto';
-import { JwtAuthGuard } from '../auth/guards';
-
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+
+import { UsersService } from './users.service';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { ChangeEmailDto } from './dto/change-email.dto';
+import { JwtAuthGuard } from '../auth/guards';
 
 type Role = 'admin' | 'manager' | 'customer';
-interface JwtPayloadLike {
+interface JwtPayload {
   sub: number;
   email: string;
   role: Role;
@@ -45,28 +44,27 @@ export class UsersController {
 
   @Get('me')
   async me(@Req() req: Request) {
-    const payload = req.user as JwtPayloadLike;
-    const user = await this.users.findById(payload.sub);
-    if (!user) throw new NotFoundException('User not found');
-    return user;
+    const payload = req.user as JwtPayload;
+    const u = await this.users.findById(payload.sub);
+    if (!u) throw new NotFoundException('User not found');
+    return u;
   }
 
   @Patch('me')
   async updateMe(@Req() req: Request, @Body() dto: UpdateProfileDto) {
-    const payload = req.user as JwtPayloadLike;
+    const payload = req.user as JwtPayload;
     return this.users.updateProfile(payload.sub, dto);
   }
 
-  /** Смена email */
   @Patch('me/email')
   async changeEmail(@Req() req: Request, @Body() dto: ChangeEmailDto) {
-    const payload = req.user as JwtPayloadLike;
+    const payload = req.user as JwtPayload;
     return this.users.changeEmail(payload.sub, dto.email);
   }
 
   @Patch('me/password')
-  async changeMyPassword(@Req() req: Request, @Body() dto: ChangePasswordDto) {
-    const payload = req.user as JwtPayloadLike;
+  async changePassword(@Req() req: Request, @Body() dto: ChangePasswordDto) {
+    const payload = req.user as JwtPayload;
     await this.users.changePassword(
       payload.sub,
       dto.currentPassword,
@@ -75,7 +73,7 @@ export class UsersController {
     return { success: true };
   }
 
-  /** Загрузка аватара (multipart/form-data, key=avatar) */
+  /** multipart/form-data, key=avatar */
   @Patch('me/avatar')
   @UseInterceptors(
     FileInterceptor('avatar', {
@@ -87,10 +85,10 @@ export class UsersController {
         },
         filename: (_req, file, cb) => {
           const ts = Date.now();
-          const safeBase = (file.originalname || 'avatar')
+          const safe = (file.originalname || 'avatar')
             .replace(/[^a-zA-Z0-9._-]+/g, '_')
             .slice(0, 60);
-          cb(null, `${ts}-${safeBase}`);
+          cb(null, `${ts}-${safe}`);
         },
       }),
       fileFilter: (_req, file, cb) => {
@@ -102,7 +100,7 @@ export class UsersController {
         }
         cb(null, true);
       },
-      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+      limits: { fileSize: 5 * 1024 * 1024 },
     }),
   )
   async uploadAvatar(
@@ -110,7 +108,7 @@ export class UsersController {
     @UploadedFile() file?: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('Файл не получен');
-    const payload = req.user as JwtPayloadLike;
+    const payload = req.user as JwtPayload;
     const { avatarUrl } = await this.users.processAndSetAvatar(
       payload.sub,
       file.path,
@@ -118,46 +116,44 @@ export class UsersController {
     return { avatarUrl };
   }
 
-  /** ЛК: избранное (все лайкнутые товары) */
+  /** ЛК: мои лайки */
   @Get('me/likes')
   async myLikes(@Req() req: Request) {
-    const payload = req.user as JwtPayloadLike;
+    const payload = req.user as JwtPayload;
     return this.users.getMyLikedProducts(payload.sub);
   }
 
-  /** ЛК: мои комментарии к товарам */
+  /** ЛК: мои комментарии */
   @Get('me/comments')
   async myComments(@Req() req: Request) {
-    const payload = req.user as JwtPayloadLike;
+    const payload = req.user as JwtPayload;
     return this.users.getMyProductComments(payload.sub);
   }
 
   /** ЛК: мои отзывы о компании */
   @Get('me/company-reviews')
   async myCompanyReviews(@Req() req: Request) {
-    const payload = req.user as JwtPayloadLike;
+    const payload = req.user as JwtPayload;
     return this.users.getMyCompanyReviews(payload.sub);
   }
 
-  /** ▼▼ Добавлено для ЛК: заказы и статистика ▼▼ */
-
   /** ЛК: мои заказы */
   @Get('me/orders')
-  async myOrders(@Req() req: Request): Promise<MyOrderRow[]> {
-    const payload = req.user as JwtPayloadLike;
+  async myOrders(@Req() req: Request) {
+    const payload = req.user as JwtPayload;
     return this.users.getMyOrders(payload.sub);
   }
 
-  /** ЛК: моя статистика */
+  /** ЛК: статистика */
   @Get('me/stats')
-  async myStats(@Req() req: Request): Promise<MyStats> {
-    const payload = req.user as JwtPayloadLike;
+  async myStats(@Req() req: Request) {
+    const payload = req.user as JwtPayload;
     return this.users.getMyStats(payload.sub);
   }
 
   @Delete('me')
   async deleteMe(@Req() req: Request) {
-    const payload = req.user as JwtPayloadLike;
+    const payload = req.user as JwtPayload;
     await this.users.deleteById(payload.sub);
     return { success: true };
   }
@@ -167,7 +163,7 @@ export class UsersController {
     @Req() req: Request,
     @Param('id', ParseIntPipe) id: number,
   ) {
-    const payload = req.user as JwtPayloadLike;
+    const payload = req.user as JwtPayload;
     if (payload.role !== 'admin')
       throw new ForbiddenException('Admin role required');
     await this.users.deleteById(id);
