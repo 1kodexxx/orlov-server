@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 
 import { QueryShopDto } from './dto/query-shop.dto';
 import { SetRatingDto } from './dto/set-rating.dto';
@@ -59,7 +59,7 @@ type LikeOwner = { customerId?: number | null; visitorId?: string | null };
 @Injectable()
 export class CatalogService {
   constructor(
-    private readonly ds: DataSource,
+    @InjectDataSource() private readonly ds: DataSource,
     @InjectRepository(Category)
     private readonly categories: Repository<Category>,
     @InjectRepository(PhoneModel)
@@ -213,24 +213,32 @@ export class CatalogService {
   /** Просмотры: всем (аноним/юзер). Антинакрутка раз в сутки на владельца. */
   async addView(
     productId: number,
-    customerId: number | null,
-    visitorId: string | null,
-    ip?: string | null,
-    ua?: string | null,
-  ): Promise<{ ok: true }> {
+    opts: {
+      customerId?: number | null;
+      visitorId?: string | null;
+      ip?: string | null;
+      userAgent?: string | null;
+    },
+  ): Promise<void> {
+    const customerId = opts.customerId ?? null;
+    const visitorId = opts.visitorId ?? null;
+    const ip = opts.ip ?? null;
+    const userAgent = opts.userAgent ?? null;
+
     await this.ds.query(
-      `INSERT INTO product_view (product_id, customer_id, visitor_id, ip, user_agent)
-       VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT ON CONSTRAINT ux_product_view_daily_guard DO NOTHING`,
-      [
-        productId,
-        customerId ?? null,
-        visitorId ?? null,
-        ip ?? null,
-        ua ?? null,
-      ],
+      `
+      INSERT INTO product_view (product_id, customer_id, visitor_id, ip, user_agent)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (
+        product_id,
+        COALESCE(customer_id, -1),
+        COALESCE(visitor_id, '00000000-0000-0000-0000-000000000000'::uuid),
+        viewed_date
+      )
+      DO NOTHING
+      `,
+      [productId, customerId, visitorId, ip, userAgent],
     );
-    return { ok: true };
   }
 
   /* ===================== ЛАЙКИ ===================== */
