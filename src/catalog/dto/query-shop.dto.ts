@@ -1,32 +1,12 @@
-// src/shop/dto/query-shop.dto.ts
-import { Transform, TransformFnParams } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import {
+  IsArray,
   IsIn,
   IsInt,
-  IsNumber,
   IsOptional,
-  IsPositive,
   IsString,
   Min,
 } from 'class-validator';
-
-const toInt = ({ value }: TransformFnParams): number | undefined => {
-  if (value === undefined || value === null || value === '') return undefined;
-  const n = Number.parseInt(String(value), 10);
-  return Number.isNaN(n) ? undefined : n;
-};
-const toFloat = ({ value }: TransformFnParams): number | undefined => {
-  if (value === undefined || value === null || value === '') return undefined;
-  const n = Number.parseFloat(String(value));
-  return Number.isNaN(n) ? undefined : n;
-};
-const toCsv = ({ value }: TransformFnParams): string[] | undefined => {
-  if (value === undefined || value === null || value === '') return undefined;
-  return String(value)
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-};
 
 export type SortKey =
   | 'relevance'
@@ -42,53 +22,63 @@ export type SortKey =
 
 export class QueryShopDto {
   @IsOptional()
-  @Transform(toInt)
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @IsOptional()
-  @Transform(toInt)
-  @IsInt()
-  @Min(1)
-  @IsPositive()
-  limit?: number = 24;
-
-  /** Поиск */
-  @IsOptional()
   @IsString()
   q?: string;
 
-  /** Чипсы категорий/тегов — шлём слаги через запятую */
+  /** ЕДИНАЯ категория (slug), например ?category=government */
   @IsOptional()
-  @Transform(toCsv)
+  @IsString()
+  category?: string;
+
+  /** НЕСКОЛЬКО категорий (comma-separated slugs), например ?categories=men,women */
+  @IsOptional()
+  @Transform(({ value }) =>
+    String(value || '')
+      .split(',')
+      .filter(Boolean),
+  )
+  @IsArray()
   categories?: string[];
 
-  /** Материалы / Коллекции / Популярность — также слаги (если это просто категории — фронт может передавать их сюда тоже) */
   @IsOptional()
-  @Transform(toCsv)
+  @Transform(({ value }) =>
+    String(value || '')
+      .split(',')
+      .filter(Boolean),
+  )
+  @IsArray()
   materials?: string[];
 
   @IsOptional()
-  @Transform(toCsv)
+  @Transform(({ value }) =>
+    String(value || '')
+      .split(',')
+      .filter(Boolean),
+  )
+  @IsArray()
   collections?: string[];
 
   @IsOptional()
-  @Transform(toCsv)
+  @Transform(({ value }) =>
+    String(value || '')
+      .split(',')
+      .filter(Boolean),
+  )
+  @IsArray()
   popularity?: string[];
 
-  /** Диапазон цены */
   @IsOptional()
-  @Transform(toFloat)
-  @IsNumber()
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(0)
   priceMin?: number;
 
   @IsOptional()
-  @Transform(toFloat)
-  @IsNumber()
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(0)
   priceMax?: number;
 
-  /** Сортировка */
   @IsOptional()
   @IsIn([
     'relevance',
@@ -102,12 +92,17 @@ export class QueryShopDto {
     'name_asc',
     'name_desc',
   ])
-  sort?: SortKey = 'relevance';
-}
+  sort?: SortKey;
 
-export class GetShopParamsDto {
-  @Transform(toInt)
+  @IsOptional()
+  @Transform(({ value }) => Number(value) || 1)
   @IsInt()
-  @IsPositive()
-  id!: number;
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => Number(value) || 24)
+  @IsInt()
+  @Min(1)
+  limit?: number;
 }

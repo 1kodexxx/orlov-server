@@ -1,4 +1,3 @@
-// src/catalog/catalog.service.ts
 import {
   Injectable,
   BadRequestException,
@@ -60,6 +59,21 @@ type MetaRow = { name: string; kind: Kind };
 type LikeOwner = { customerId?: number | null; visitorId?: string | null };
 type RatingOwner = { customerId: number | null; visitorId: string | null };
 
+/* ===== соответствие slug → русский ярлык (для обратной совместимости данных) ===== */
+const slugToLabel: Record<string, string> = {
+  men: 'Мужчинам',
+  women: 'Женщинам',
+  patriots: 'Патриотам',
+  government: 'Гос.служащим',
+  business: 'Для бизнеса',
+  premium: 'Премиум',
+  cultural: 'Культурный код',
+  imperial: 'Имперский стиль',
+  orthodoxy: 'Православие',
+  history: 'История',
+  ussr: 'СССР',
+};
+
 @Injectable()
 export class CatalogService {
   constructor(
@@ -97,7 +111,8 @@ export class CatalogService {
   async findAll(dto: QueryShopDto): Promise<Paged<ProductRow>> {
     const {
       q,
-      categories = [],
+      category,
+      categories: categoriesParam = [],
       materials = [],
       collections = [],
       popularity = [],
@@ -112,19 +127,31 @@ export class CatalogService {
       throw new BadRequestException('priceMin must be ≤ priceMax');
     }
 
+    // слуги категорий (OR-логика)
+    const categorySlugs = [...categoriesParam, ...(category ? [category] : [])];
+
+    // русские ярлыки для обратной совместимости (если slug ещё не заполнен в БД)
+    const categoryLabels = categorySlugs
+      .map((s) => slugToLabel[s])
+      .filter(Boolean);
+
     const qb: SelectQueryBuilder<Record<string, any>> = this.ds
       .createQueryBuilder()
       .select('*')
       .from('v_product_full', 'vp');
 
+    // Поиск
     if (q?.trim()) {
       qb.andWhere('(vp.name ILIKE :q OR vp.description ILIKE :q)', {
         q: `%${q.trim()}%`,
       });
     }
+
+    // Диапазон цены
     if (priceMin != null) qb.andWhere('vp.price >= :priceMin', { priceMin });
     if (priceMax != null) qb.andWhere('vp.price <= :priceMax', { priceMax });
 
+    // Простые фильтры
     if (materials.length)
       qb.andWhere('vp.material = ANY(:mats)', { mats: materials });
     if (collections.length)
@@ -132,13 +159,32 @@ export class CatalogService {
     if (popularity.length)
       qb.andWhere('vp.popularity = ANY(:pops)', { pops: popularity });
 
-    if (categories.length) {
+    // ===== ФИЛЬТР ПО КАТЕГОРИЯМ =====
+    if (categorySlugs.length) {
+      // 1) правильный путь — по slug
+      // 2) fallback — по русскому имени (если slug ещё пуст)
       qb.andWhere(
-        `EXISTS (SELECT 1 FROM unnest(vp.categories) AS x(name) WHERE x.name = ANY(:cats))`,
-        { cats: categories },
+        `
+        EXISTS (
+          SELECT 1
+            FROM product_category pc
+            JOIN category c ON c.category_id = pc.category_id
+           WHERE pc.product_id = vp.product_id
+             AND (
+                  c.slug = ANY(:slugs)
+               OR (:labelsLen > 0 AND c.name = ANY(:labels))
+             )
+        )
+      `,
+        {
+          slugs: categorySlugs,
+          labels: categoryLabels,
+          labelsLen: categoryLabels.length,
+        },
       );
     }
 
+    // Сортировка
     switch (sort) {
       case 'name_asc':
         qb.orderBy('vp.name', 'ASC');
@@ -180,7 +226,9 @@ export class CatalogService {
           .addOrderBy('vp.created_at', 'DESC');
     }
 
-    // копируем условия в COUNT(*)
+    // Пагинация + COUNT
+    const offset = (page - 1) * limit;
+
     const totalQb = this.ds
       .createQueryBuilder()
       .select('COUNT(*)', 'count')
@@ -190,8 +238,6 @@ export class CatalogService {
     (qb.expressionMap.wheres || []).forEach((w) =>
       totalQb.andWhere(w.condition),
     );
-
-    const offset = (page - 1) * limit;
 
     const [itemsRaw, totalRaw] = await Promise.all([
       qb.limit(limit).offset(offset).getRawMany<ProductRow>(),
@@ -255,7 +301,6 @@ export class CatalogService {
       [optsProductId, customerId, visitorId, ip, userAgent],
     );
 
-    // Обновим счётчик просмотров в product
     await this.recalcViewCount(optsProductId);
   }
 
@@ -334,7 +379,6 @@ export class CatalogService {
     if (!customerId && !visitorId)
       throw new BadRequestException('owner required');
 
-    // upsert для user-конфликта
     if (customerId) {
       await this.ds.query(
         `INSERT INTO review (product_id, customer_id, visitor_id, rating, comment)
@@ -344,7 +388,6 @@ export class CatalogService {
         [productId, customerId, dto.rating, dto.comment ?? null],
       );
     } else {
-      // upsert для гостя по visitor_id
       await this.ds.query(
         `INSERT INTO review (product_id, customer_id, visitor_id, rating, comment)
          VALUES ($1, NULL, $2, $3, NULLIF($4,''))
