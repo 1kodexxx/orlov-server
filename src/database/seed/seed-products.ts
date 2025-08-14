@@ -1,7 +1,7 @@
 // src/database/seed/seed-products.ts
 import 'dotenv/config';
 import dataSource from '../data-source';
-import { allProducts } from '../../data/products.data';
+import { allProducts } from '../../data1/products.data';
 
 type SeedProduct = {
   id: number;

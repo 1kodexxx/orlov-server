@@ -1,8 +1,9 @@
-// src/database/migrations/1710000012000-squashed-final.ts
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class SquashedFinal1710000012000 implements MigrationInterface {
-  name = 'SquashedFinal1710000012000';
+export class SquashedAccountCatalogFinal1710000013000
+  implements MigrationInterface
+{
+  name = 'SquashedAccountCatalogFinal1710000013000';
 
   public async up(q: QueryRunner): Promise<void> {
     await q.query(`
@@ -37,7 +38,6 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
         CONSTRAINT category_kind_check
           CHECK (kind IN ('normal','material','collection','popularity'))
       );
-      -- уникальность slug (чувствительная/нечувствительная к регистру)
       DO $$
       BEGIN
         IF NOT EXISTS (
@@ -65,6 +65,10 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
         view_count     BIGINT NOT NULL DEFAULT 0,
         like_count     INT    NOT NULL DEFAULT 0,
         avg_rating     DECIMAL(3,2) NOT NULL DEFAULT 0.00,
+        /* enum-like scalar filters */
+        material       VARCHAR(20),
+        popularity     VARCHAR(20),
+        collection     VARCHAR(20),
         created_at     timestamptz NOT NULL DEFAULT now(),
         updated_at     timestamptz NOT NULL DEFAULT now()
       );
@@ -100,7 +104,6 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS ux_customer_email ON customer (lower(email));
 
-      /* account-delta: доп. поля профиля */
       ALTER TABLE customer
         ADD COLUMN IF NOT EXISTS city             VARCHAR(120),
         ADD COLUMN IF NOT EXISTS country          VARCHAR(120),
@@ -129,10 +132,9 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
         status              VARCHAR(50) NOT NULL,
         shipping_address_id INT REFERENCES address(address_id),
         total_amount        DECIMAL(10,2) NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
-        updated_at          timestamptz NOT NULL DEFAULT now()  -- добавлено сразу
+        updated_at          timestamptz NOT NULL DEFAULT now()
       );
 
-      /* статус-чек (если ещё не существует) */
       DO $$
       BEGIN
         IF NOT EXISTS (
@@ -173,17 +175,28 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
         status           VARCHAR(50)
       );
 
+      /* ---------------- reviews (товар) — теперь и гости тоже ---------------- */
       CREATE TABLE IF NOT EXISTS review (
         review_id   SERIAL PRIMARY KEY,
         product_id  INT NOT NULL REFERENCES product(product_id) ON DELETE CASCADE,
-        customer_id INT NOT NULL REFERENCES customer(customer_id) ON DELETE CASCADE,
+        customer_id INT REFERENCES customer(customer_id) ON DELETE CASCADE,
+        visitor_id  uuid,
         rating      SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
         comment     TEXT,
         review_date timestamptz NOT NULL DEFAULT now(),
-        UNIQUE (product_id, customer_id)
+        CONSTRAINT review_exactly_one_owner
+          CHECK (
+            (customer_id IS NOT NULL AND visitor_id IS NULL) OR
+            (customer_id IS NULL AND visitor_id IS NOT NULL)
+          )
       );
+      /* уникальность оценки на продукт от конкретного субъекта */
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_review_customer
+        ON review(product_id, customer_id) WHERE customer_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_review_visitor
+        ON review(product_id, visitor_id) WHERE visitor_id IS NOT NULL;
 
-      /* product_like — финальная версия с гостями */
+      /* ---------------- likes — гости и пользователи ---------------- */
       CREATE TABLE IF NOT EXISTS product_like (
         id          BIGSERIAL PRIMARY KEY,
         product_id  INT NOT NULL REFERENCES product(product_id) ON DELETE CASCADE,
@@ -201,7 +214,25 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
       CREATE UNIQUE INDEX IF NOT EXISTS ux_product_like_visitor
         ON product_like(product_id, visitor_id) WHERE visitor_id IS NOT NULL;
 
-      /* product_view — финальная версия с дневной защитой */
+      /* ---------------- favorites (избранное) — отдельная сущность ---------------- */
+      CREATE TABLE IF NOT EXISTS product_favorite (
+        id          BIGSERIAL PRIMARY KEY,
+        product_id  INT NOT NULL REFERENCES product(product_id) ON DELETE CASCADE,
+        customer_id INT REFERENCES customer(customer_id) ON DELETE CASCADE,
+        visitor_id  uuid,
+        added_at    timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT product_favorite_exactly_one_owner
+          CHECK (
+            (customer_id IS NOT NULL AND visitor_id IS NULL)
+            OR (customer_id IS NULL AND visitor_id IS NOT NULL)
+          )
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_product_favorite_user
+        ON product_favorite(product_id, customer_id) WHERE customer_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_product_favorite_visitor
+        ON product_favorite(product_id, visitor_id) WHERE visitor_id IS NOT NULL;
+
+      /* ---------------- просмотры — считаем только на странице товара ---------------- */
       CREATE TABLE IF NOT EXISTS product_view (
         view_id     SERIAL PRIMARY KEY,
         product_id  INT NOT NULL REFERENCES product(product_id) ON DELETE CASCADE,
@@ -239,6 +270,7 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
         END IF;
       END $$;
 
+      /* ---------------- комментарии — только зарегистрированные ---------------- */
       CREATE TABLE IF NOT EXISTS comment (
         comment_id        SERIAL PRIMARY KEY,
         product_id        INT NOT NULL REFERENCES product(product_id) ON DELETE CASCADE,
@@ -248,6 +280,7 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
         created_at        timestamptz NOT NULL DEFAULT now()
       );
 
+      /* ---------------- отзывы о компании — только зарегистрированные ---------------- */
       CREATE TABLE IF NOT EXISTS company_reviews (
         id           BIGSERIAL PRIMARY KEY,
         customer_id  INTEGER NOT NULL REFERENCES customer(customer_id) ON DELETE CASCADE,
@@ -261,7 +294,7 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
       CREATE INDEX IF NOT EXISTS idx_company_reviews_is_approved ON company_reviews(is_approved);
       CREATE INDEX IF NOT EXISTS idx_company_reviews_created_at  ON company_reviews(created_at);
 
-      /* ---------- account-delta (гости и корзина) ---------- */
+      /* ---------- guests & cart ---------- */
 
       CREATE TABLE IF NOT EXISTS guest_session (
         id UUID PRIMARY KEY,
@@ -313,7 +346,8 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
         UPDATE product p
            SET avg_rating = COALESCE((
              SELECT ROUND(AVG(r.rating)::numeric, 2)
-             FROM review r WHERE r.product_id = COALESCE(NEW.product_id, OLD.product_id)
+             FROM review r
+             WHERE r.product_id = COALESCE(NEW.product_id, OLD.product_id)
            ), 0.00)
          WHERE p.product_id = COALESCE(NEW.product_id, OLD.product_id);
         RETURN COALESCE(NEW, OLD);
@@ -375,14 +409,12 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
         BEFORE INSERT OR UPDATE OF shipping_address_id, customer_id ON orders
         FOR EACH ROW EXECUTE FUNCTION check_order_address_belongs_to_customer();
 
-      /* touch для orders.updated_at */
       CREATE OR REPLACE FUNCTION orders_touch_updated_at()
       RETURNS TRIGGER AS $$
       BEGIN
         NEW.updated_at := now();
         RETURN NEW;
       END $$ LANGUAGE plpgsql;
-
       DROP TRIGGER IF EXISTS trg_orders_touch ON orders;
       CREATE TRIGGER trg_orders_touch
       BEFORE UPDATE ON orders
@@ -403,22 +435,68 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
       CREATE TRIGGER trg_order_item_recalc_delete AFTER DELETE ON order_item
         FOR EACH ROW EXECUTE FUNCTION recalc_order_total();
 
-      /* ---------- views ---------- */
+      /* ---------- enum-like checks for product filters ---------- */
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'product_material_ck' AND conrelid = 'product'::regclass
+        ) THEN
+          ALTER TABLE product
+            ADD CONSTRAINT product_material_ck
+            CHECK (material IN ('Кожа', 'Металл', 'Силикон'));
+        END IF;
 
-      CREATE OR REPLACE VIEW v_product_full AS
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'product_popularity_ck' AND conrelid = 'product'::regclass
+        ) THEN
+          ALTER TABLE product
+            ADD CONSTRAINT product_popularity_ck
+            CHECK (popularity IN ('hit','new','recommended'));
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'product_collection_ck' AND conrelid = 'product'::regclass
+        ) THEN
+          ALTER TABLE product
+            ADD CONSTRAINT product_collection_ck
+            CHECK (collection IN ('business','limited','premium','autumn2025'));
+        END IF;
+      END $$;
+
+      /* Значения по умолчанию, если NULL (на случай существующих данных) */
+      UPDATE product SET material='Кожа'       WHERE material   IS NULL;
+      UPDATE product SET popularity='new'      WHERE popularity IS NULL;
+      UPDATE product SET collection='business' WHERE collection IS NULL;
+
+      ALTER TABLE product
+        ALTER COLUMN material   SET NOT NULL,
+        ALTER COLUMN popularity SET NOT NULL,
+        ALTER COLUMN collection SET NOT NULL;
+
+      /* ---------- views ---------- */
+      DROP VIEW IF EXISTS v_product_full;
+      CREATE VIEW v_product_full AS
       SELECT
         p.product_id,
         p.sku,
         p.name,
         p.description,
-        p.price::numeric(10,2)        AS price,
+        p.price::numeric(10,2)     AS price,
         p.stock_quantity,
         p.phone_model_id,
         p.view_count,
         p.like_count,
-        p.avg_rating::numeric(3,2)    AS avg_rating,
+        p.avg_rating::numeric(3,2) AS avg_rating,
+        /* scalar filters */
+        p.material,
+        p.popularity,
+        p.collection,
         p.created_at,
         p.updated_at,
+        /* images as ordered jsonb */
         COALESCE(
           jsonb_agg(
             jsonb_build_object('url', pi.url, 'position', pi.position)
@@ -426,25 +504,19 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
           ) FILTER (WHERE pi.url IS NOT NULL),
           '[]'::jsonb
         ) AS images,
-        COALESCE(array_agg(DISTINCT c.name) FILTER (WHERE c.kind = 'normal'),     ARRAY[]::text[]) AS categories,
-        COALESCE(array_agg(DISTINCT c.name) FILTER (WHERE c.kind = 'material'),   ARRAY[]::text[]) AS materials,
-        COALESCE(array_agg(DISTINCT c.name) FILTER (WHERE c.kind = 'collection'), ARRAY[]::text[]) AS collections,
-        COALESCE(array_agg(DISTINCT c.name) FILTER (WHERE c.kind = 'popularity'), ARRAY[]::text[]) AS popularity
+        /* normal categories */
+        COALESCE(array_agg(DISTINCT c.name) FILTER (WHERE c.kind = 'normal'), ARRAY[]::text[]) AS categories,
+        /* back-compat arrays */
+        ARRAY[p.material]   AS materials,
+        ARRAY[p.collection] AS collections,
+        ARRAY[p.popularity] AS popularity_arr
       FROM product p
-      LEFT JOIN product_image pi ON pi.product_id = p.product_id
+      LEFT JOIN product_image   pi ON pi.product_id = p.product_id
       LEFT JOIN product_category pc ON pc.product_id = p.product_id
-      LEFT JOIN category c ON c.category_id = pc.category_id
+      LEFT JOIN category        c  ON c.category_id = pc.category_id
       GROUP BY p.product_id;
 
-      CREATE OR REPLACE VIEW company_rating_view AS
-      SELECT
-        COALESCE(AVG(rating)::numeric(3,2), 0.00) AS avg_company_rating,
-        COUNT(*)::int                             AS reviews_count
-      FROM company_reviews
-      WHERE is_approved = true;
-
       /* ---------- supporting indexes ---------- */
-
       CREATE INDEX IF NOT EXISTS idx_product_phone_model_id       ON product(phone_model_id);
       CREATE INDEX IF NOT EXISTS idx_product_category_category_id ON product_category(category_id);
       CREATE INDEX IF NOT EXISTS idx_orders_customer              ON orders(customer_id);
@@ -455,20 +527,31 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
       CREATE INDEX IF NOT EXISTS idx_shipment_order               ON shipment(order_id);
       CREATE INDEX IF NOT EXISTS idx_review_product               ON review(product_id);
       CREATE INDEX IF NOT EXISTS idx_review_customer              ON review(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_review_visitor               ON review(visitor_id);
       CREATE INDEX IF NOT EXISTS idx_product_like_product         ON product_like(product_id);
       CREATE INDEX IF NOT EXISTS idx_product_like_customer        ON product_like(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_product_like_visitor         ON product_like(visitor_id);
+      CREATE INDEX IF NOT EXISTS idx_product_favorite_product     ON product_favorite(product_id);
+      CREATE INDEX IF NOT EXISTS idx_product_favorite_customer    ON product_favorite(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_product_favorite_visitor     ON product_favorite(visitor_id);
       CREATE INDEX IF NOT EXISTS idx_product_view_product         ON product_view(product_id);
       CREATE INDEX IF NOT EXISTS idx_product_view_customer        ON product_view(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_product_view_visitor         ON product_view(visitor_id);
       CREATE INDEX IF NOT EXISTS idx_comment_product              ON comment(product_id);
       CREATE INDEX IF NOT EXISTS idx_comment_parent               ON comment(parent_comment_id);
 
-      /* индексы под поиск/сортировки каталога */
+      /* search/sort in catalog */
       CREATE INDEX IF NOT EXISTS idx_product_name_trgm    ON product USING GIN (name gin_trgm_ops);
       CREATE INDEX IF NOT EXISTS idx_product_price        ON product(price);
       CREATE INDEX IF NOT EXISTS idx_product_created_at   ON product(created_at);
       CREATE INDEX IF NOT EXISTS idx_product_avg_rating   ON product(avg_rating);
       CREATE INDEX IF NOT EXISTS idx_product_like_count   ON product(like_count);
       CREATE INDEX IF NOT EXISTS idx_product_view_count   ON product(view_count);
+
+      /* filters */
+      CREATE INDEX IF NOT EXISTS idx_product_material     ON product(material);
+      CREATE INDEX IF NOT EXISTS idx_product_popularity   ON product(popularity);
+      CREATE INDEX IF NOT EXISTS idx_product_collection   ON product(collection);
     `);
   }
 
@@ -476,7 +559,6 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
     await q.query(`
       /* ---------- views ---------- */
       DROP VIEW IF EXISTS v_product_full;
-      DROP VIEW IF EXISTS company_rating_view;
 
       /* ---------- triggers (drop before functions) ---------- */
       DROP TRIGGER IF EXISTS trg_product_touch ON product;
@@ -509,10 +591,12 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
       DROP INDEX IF EXISTS ux_category_slug_lower;
       DROP INDEX IF EXISTS idx_category_parent;
       DROP INDEX IF EXISTS idx_category_kind;
-      DROP INDEX IF EXISTS idx_category_name_kind;
+      DROP INDEX IF NOT EXISTS idx_category_name_kind;
+
       DROP INDEX IF EXISTS idx_company_reviews_customer;
       DROP INDEX IF EXISTS idx_company_reviews_is_approved;
       DROP INDEX IF EXISTS idx_company_reviews_created_at;
+
       DROP INDEX IF EXISTS ux_address_default_per_customer;
       DROP INDEX IF EXISTS idx_product_image_product_id;
       DROP INDEX IF EXISTS ux_customer_email;
@@ -525,17 +609,25 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
       DROP INDEX IF EXISTS idx_order_item_product;
       DROP INDEX IF EXISTS idx_payment_order;
       DROP INDEX IF EXISTS idx_shipment_order;
+
       DROP INDEX IF EXISTS idx_review_product;
       DROP INDEX IF EXISTS idx_review_customer;
+      DROP INDEX IF EXISTS idx_review_visitor;
+
       DROP INDEX IF EXISTS idx_product_like_product;
       DROP INDEX IF EXISTS idx_product_like_customer;
+      DROP INDEX IF EXISTS idx_product_like_visitor;
+
+      DROP INDEX IF EXISTS idx_product_favorite_product;
+      DROP INDEX IF EXISTS idx_product_favorite_customer;
+      DROP INDEX IF EXISTS idx_product_favorite_visitor;
+
       DROP INDEX IF EXISTS idx_product_view_product;
       DROP INDEX IF EXISTS idx_product_view_customer;
+      DROP INDEX IF EXISTS idx_product_view_visitor;
+
       DROP INDEX IF EXISTS idx_comment_product;
       DROP INDEX IF EXISTS idx_comment_parent;
-
-      DROP INDEX IF EXISTS ux_product_like_visitor;
-      DROP INDEX IF EXISTS ux_product_like_user;
 
       DROP INDEX IF EXISTS idx_product_name_trgm;
       DROP INDEX IF EXISTS idx_product_price;
@@ -544,9 +636,18 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
       DROP INDEX IF EXISTS idx_product_like_count;
       DROP INDEX IF EXISTS idx_product_view_count;
 
+      DROP INDEX IF EXISTS idx_product_material;
+      DROP INDEX IF EXISTS idx_product_popularity;
+      DROP INDEX IF EXISTS idx_product_collection;
+
       DROP INDEX IF EXISTS idx_guest_session_last_seen;
       DROP INDEX IF EXISTS uq_cart_customer;
       DROP INDEX IF EXISTS uq_cart_guest;
+
+      DROP INDEX IF EXISTS ux_product_like_user;
+      DROP INDEX IF EXISTS ux_product_like_visitor;
+      DROP INDEX IF EXISTS ux_product_favorite_user;
+      DROP INDEX IF EXISTS ux_product_favorite_visitor;
 
       /* ---------- tables (children first) ---------- */
       DROP TABLE IF EXISTS cart_item;
@@ -555,34 +656,32 @@ export class SquashedFinal1710000012000 implements MigrationInterface {
 
       DROP TABLE IF EXISTS comment;
       DROP TABLE IF EXISTS product_view;
+      DROP TABLE IF EXISTS product_favorite;
       DROP TABLE IF EXISTS product_like;
       DROP TABLE IF EXISTS review;
       DROP TABLE IF EXISTS shipment;
       DROP TABLE IF EXISTS payment;
       DROP TABLE IF EXISTS order_item;
 
-      /* orders: снять констрейнт и колонку updated_at перед дропом */
       ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_ck;
-      -- Колонка updated_at удалится вместе с таблицей, но на всякий случай:
-      -- ALTER TABLE orders DROP COLUMN IF EXISTS updated_at;
       DROP TABLE IF EXISTS orders;
 
       DROP TABLE IF EXISTS address;
       DROP TABLE IF EXISTS product_category;
       DROP TABLE IF EXISTS product_image;
+      /* drop product checks */
+      ALTER TABLE IF EXISTS product DROP CONSTRAINT IF EXISTS product_material_ck;
+      ALTER TABLE IF EXISTS product DROP CONSTRAINT IF EXISTS product_popularity_ck;
+      ALTER TABLE IF EXISTS product DROP CONSTRAINT IF EXISTS product_collection_ck;
       DROP TABLE IF EXISTS product;
 
-      -- category self-ref: убрать уникальный констрейнт перед дропом
       ALTER TABLE IF EXISTS category DROP CONSTRAINT IF EXISTS uq_category_slug;
       DROP TABLE IF EXISTS category;
 
       DROP TABLE IF EXISTS phone_model;
       DROP TABLE IF EXISTS company_reviews;
-
-      -- customer: (таблица уходит целиком, поля профиля/ pickup_point дропать отдельно не нужно)
       DROP TABLE IF EXISTS customer;
 
-      /* ---------- extensions ---------- */
       DROP EXTENSION IF EXISTS pg_trgm;
     `);
   }

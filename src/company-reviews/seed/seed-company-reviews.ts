@@ -2,7 +2,7 @@
 import 'reflect-metadata';
 import dataSource from '../../database/data-source';
 
-import { testimonials } from '../../data/reviews.data';
+import { testimonials } from '../../data1/reviews.data';
 import { CompanyReview } from '../company-reviews.entity';
 import { User } from '../../users/users.entity';
 

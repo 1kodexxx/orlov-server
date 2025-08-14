@@ -1,3 +1,4 @@
+// src/catalog/catalog.controller.ts
 import {
   BadRequestException,
   Body,
@@ -22,13 +23,27 @@ import { AddCommentDto } from './dto/add-comment.dto';
 import { JwtAuthGuard, JwtOptionalAuthGuard } from '../auth/guards';
 import { isJwtPayload, type JwtPayload } from '../auth/types';
 
-type ReqMaybeUser = Request & { user?: unknown; visitorId?: string };
+/** Request, в котором user может отсутствовать, а visitorId подставляется middleware */
+type ReqMaybeUser = Request & { user?: unknown; visitorId?: string | null };
+
+/** Утилита: определить владельца действия (авторизованный пользователь либо гость) */
+function pickOwner(
+  req: ReqMaybeUser,
+):
+  | { customerId: number; visitorId: null }
+  | { customerId: null; visitorId: string | null } {
+  const payload: JwtPayload | null = isJwtPayload(req.user) ? req.user : null;
+  if (payload) {
+    return { customerId: payload.sub, visitorId: null };
+  }
+  return { customerId: null, visitorId: req.visitorId ?? null };
+}
 
 @Controller('catalog')
 export class CatalogController {
   constructor(private readonly service: CatalogService) {}
 
-  /* -------- Каталог, карточка, мета -------- */
+  /* -------- Каталог, мета, карточка -------- */
 
   @Get()
   async list(@Query() dto: QueryShopDto) {
@@ -40,12 +55,40 @@ export class CatalogController {
     return this.service.getMeta();
   }
 
+  // Детальная: вернём также liked/myRating для текущего владельца
+  @UseGuards(JwtOptionalAuthGuard)
   @Get(':id')
-  async one(@Param('id', ParseIntPipe) id: number) {
-    return this.service.findOne(id);
+  async one(@Param('id', ParseIntPipe) id: number, @Req() req: ReqMaybeUser) {
+    const owner = pickOwner(req);
+    const row = await this.service.findOne(id);
+
+    let liked = false;
+    let myRating = 0;
+
+    if (owner.customerId) {
+      liked = await this.service.isLiked(id, owner.customerId);
+      myRating = (await this.service.userRatingFor(id, owner.customerId)) ?? 0;
+    } else if (owner.visitorId) {
+      // для гостя проверим лайк/рейтинг напрямую
+      const likedRows = await this.service['ds'].query<
+        Array<Record<string, never>>
+      >(
+        `SELECT 1 FROM product_like WHERE product_id=$1 AND visitor_id=$2 LIMIT 1`,
+        [id, owner.visitorId],
+      );
+      liked = likedRows.length > 0;
+
+      const r = await this.service['ds'].query<Array<{ rating: number }>>(
+        `SELECT rating FROM review WHERE product_id=$1 AND visitor_id=$2 LIMIT 1`,
+        [id, owner.visitorId],
+      );
+      myRating = r[0]?.rating ?? 0;
+    }
+
+    return { ...row, liked, myRating };
   }
 
-  /* -------- Просмотры: публично -------- */
+  /* -------- Просмотры: засчитываем ТОЛЬКО на детальной странице -------- */
 
   @UseGuards(JwtOptionalAuthGuard)
   @Post(':id/view')
@@ -54,10 +97,7 @@ export class CatalogController {
     @Param('id', ParseIntPipe) id: number,
     @Req() req: ReqMaybeUser,
   ) {
-    const payload: JwtPayload | null = isJwtPayload(req.user) ? req.user : null;
-
-    const customerId = payload?.sub ?? null;
-    const visitorId = req.visitorId ?? null;
+    const owner = pickOwner(req);
 
     const ip = String(
       (req.headers['x-forwarded-for'] as string | undefined) ??
@@ -66,19 +106,20 @@ export class CatalogController {
     );
     const ua = String(req.headers['user-agent'] ?? '').trim();
 
-    // Совместимый вызов: сервис поддерживает и такую сигнатуру (5 аргументов)
-    return this.service.addView(id, customerId, visitorId, ip, ua);
+    return this.service.addView(id, {
+      customerId: owner.customerId,
+      visitorId: owner.visitorId,
+      ip,
+      userAgent: ua,
+    });
   }
 
-  /* -------- Лайки: публично (user || visitorId) -------- */
+  /* -------- Лайки: доступны всем (user || visitorId) -------- */
 
   @UseGuards(JwtOptionalAuthGuard)
   @Post(':id/like')
   async like(@Param('id', ParseIntPipe) id: number, @Req() req: ReqMaybeUser) {
-    const payload: JwtPayload | null = isJwtPayload(req.user) ? req.user : null;
-    const owner = payload
-      ? { customerId: payload.sub }
-      : { visitorId: req.visitorId ?? null };
+    const owner = pickOwner(req);
     return this.service.likePublic(id, owner);
   }
 
@@ -88,47 +129,39 @@ export class CatalogController {
     @Param('id', ParseIntPipe) id: number,
     @Req() req: ReqMaybeUser,
   ) {
-    const payload: JwtPayload | null = isJwtPayload(req.user) ? req.user : null;
-    const owner = payload
-      ? { customerId: payload.sub }
-      : { visitorId: req.visitorId ?? null };
+    const owner = pickOwner(req);
     return this.service.unlikePublic(id, owner);
   }
 
-  /** Публичное избранное: если есть JWT — по user, иначе — по cookie vid */
+  /** Публичное «избранное» на базе лайков */
   @UseGuards(JwtOptionalAuthGuard)
   @Get('favorites')
   async favorites(@Req() req: ReqMaybeUser) {
-    const payload: JwtPayload | null = isJwtPayload(req.user) ? req.user : null;
-    const owner = payload
-      ? { customerId: payload.sub }
-      : { visitorId: req.visitorId ?? null };
+    const owner = pickOwner(req);
     return this.service.getFavoritesPublic(owner);
   }
 
-  /* -------- Рейтинги: только авторизованным -------- */
+  /* -------- Рейтинг: доступен всем (user || visitorId) -------- */
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtOptionalAuthGuard)
   @Post(':id/rating')
   async setRating(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: SetRatingDto,
     @Req() req: ReqMaybeUser,
   ) {
-    const payload: JwtPayload | null = isJwtPayload(req.user) ? req.user : null;
-    if (!payload) throw new BadRequestException();
-    return this.service.setRating(id, payload.sub, dto);
+    const owner = pickOwner(req);
+    return this.service.setRatingPublic(id, owner, dto);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtOptionalAuthGuard)
   @Delete(':id/rating')
   async deleteRating(
     @Param('id', ParseIntPipe) id: number,
     @Req() req: ReqMaybeUser,
   ) {
-    const payload: JwtPayload | null = isJwtPayload(req.user) ? req.user : null;
-    if (!payload) throw new BadRequestException();
-    return this.service.deleteRating(id, payload.sub);
+    const owner = pickOwner(req);
+    return this.service.deleteRatingPublic(id, owner);
   }
 
   /* -------- Комментарии -------- */

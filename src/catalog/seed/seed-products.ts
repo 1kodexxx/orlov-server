@@ -1,5 +1,5 @@
 // src/database/seed/seed-products.ts
-import { allProducts } from '../../data/products.data';
+import { allProducts } from '../../data1/products.data';
 
 export type SeedProduct = {
   id: number;

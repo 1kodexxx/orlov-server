@@ -1,3 +1,4 @@
+// src/catalog/catalog.service.ts
 import {
   Injectable,
   BadRequestException,
@@ -22,17 +23,15 @@ export type ProductRow = {
   view_count: number;
   like_count: number;
   avg_rating: number;
-  /** Новые scalar-поля из product */
   material: 'Кожа' | 'Металл' | 'Силикон';
   popularity: 'hit' | 'new' | 'recommended';
   collection: 'business' | 'limited' | 'premium' | 'autumn2025';
   created_at: string;
   updated_at: string;
-  /** Массивы оставлены для обратной совместимости UI */
   categories: string[];
   materials: string[];
   collections: string[];
-  popularity_arr?: string[]; // массивная версия популярности, если нужна
+  popularity_arr?: string[];
   images?: string[] | Array<{ url: string; position: number }>;
 };
 
@@ -59,6 +58,7 @@ type MetaRow = { name: string; kind: Kind };
 
 /** Владелец лайка: либо авторизованный пользователь, либо гость по visitorId */
 type LikeOwner = { customerId?: number | null; visitorId?: string | null };
+type RatingOwner = { customerId: number | null; visitorId: string | null };
 
 @Injectable()
 export class CatalogService {
@@ -84,7 +84,16 @@ export class CatalogService {
     );
   }
 
-  /** Каталог с фильтрами/сортировкой (поверх VIEW v_product_full) */
+  private async recalcViewCount(productId: number): Promise<void> {
+    await this.ds.query(
+      `UPDATE product
+          SET view_count = (SELECT COUNT(*)::int FROM product_view pv WHERE pv.product_id = $1)
+        WHERE product_id = $1`,
+      [productId],
+    );
+  }
+
+  /** Каталог с фильтрами/поиском/сортировкой */
   async findAll(dto: QueryShopDto): Promise<Paged<ProductRow>> {
     const {
       q,
@@ -116,17 +125,13 @@ export class CatalogService {
     if (priceMin != null) qb.andWhere('vp.price >= :priceMin', { priceMin });
     if (priceMax != null) qb.andWhere('vp.price <= :priceMax', { priceMax });
 
-    /* фильтры по scalar-колонкам */
-    if (materials.length) {
+    if (materials.length)
       qb.andWhere('vp.material = ANY(:mats)', { mats: materials });
-    }
-    if (collections.length) {
+    if (collections.length)
       qb.andWhere('vp.collection = ANY(:cols)', { cols: collections });
-    }
-    if (popularity.length) {
+    if (popularity.length)
       qb.andWhere('vp.popularity = ANY(:pops)', { pops: popularity });
-    }
-    /* обычные категории (kind='normal') — по массиву categories */
+
     if (categories.length) {
       qb.andWhere(
         `EXISTS (SELECT 1 FROM unnest(vp.categories) AS x(name) WHERE x.name = ANY(:cats))`,
@@ -175,7 +180,7 @@ export class CatalogService {
           .addOrderBy('vp.created_at', 'DESC');
     }
 
-    // корректный total (копируем where)
+    // копируем условия в COUNT(*)
     const totalQb = this.ds
       .createQueryBuilder()
       .select('COUNT(*)', 'count')
@@ -219,56 +224,21 @@ export class CatalogService {
   }
 
   /* ===================== ПРОСМОТРЫ ===================== */
-  // Перегрузки: поддерживаем и старый вызов с 5 аргументами, и новый с объектом.
   async addView(
-    productId: number,
+    optsProductId: number,
     opts: {
       customerId?: number | null;
       visitorId?: string | null;
       ip?: string | null;
       userAgent?: string | null;
     },
-  ): Promise<void>;
-  async addView(
-    productId: number,
-    customerId?: number | null,
-    visitorId?: string | null,
-    ip?: string | null,
-    userAgent?: string | null,
-  ): Promise<void>;
-
-  async addView(
-    productId: number,
-    a?:
-      | number
-      | {
-          customerId?: number | null;
-          visitorId?: string | null;
-          ip?: string | null;
-          userAgent?: string | null;
-        }
-      | null,
-    b?: string | null,
-    c?: string | null,
-    d?: string | null,
   ): Promise<void> {
-    // Нормализуем аргументы в объект
-    let customerId: number | null = null;
-    let visitorId: string | null = null;
-    let ip: string | null = null;
-    let userAgent: string | null = null;
-
-    if (typeof a === 'object' && a !== null) {
-      customerId = a.customerId ?? null;
-      visitorId = a.visitorId ?? null;
-      ip = a.ip ?? null;
-      userAgent = a.userAgent ?? null;
-    } else {
-      customerId = (a as number | null) ?? null;
-      visitorId = b ?? null;
-      ip = c ?? null;
-      userAgent = d ?? null;
-    }
+    const {
+      customerId = null,
+      visitorId = null,
+      ip = null,
+      userAgent = null,
+    } = opts;
 
     await this.ds.query(
       `
@@ -282,36 +252,19 @@ export class CatalogService {
       )
       DO NOTHING
       `,
-      [productId, customerId, visitorId, ip, userAgent],
+      [optsProductId, customerId, visitorId, ip, userAgent],
     );
+
+    // Обновим счётчик просмотров в product
+    await this.recalcViewCount(optsProductId);
   }
 
   /* ===================== ЛАЙКИ ===================== */
 
-  async like(productId: number, userId: number): Promise<{ liked: true }> {
-    await this.ds.query(
-      `INSERT INTO product_like (product_id, customer_id) VALUES ($1,$2)
-       ON CONFLICT DO NOTHING`,
-      [productId, userId],
-    );
-    await this.recalcLikeCount(productId);
-    return { liked: true };
-  }
-
-  async unlike(productId: number, userId: number): Promise<{ liked: false }> {
-    await this.ds.query(
-      `DELETE FROM product_like WHERE product_id=$1 AND customer_id=$2`,
-      [productId, userId],
-    );
-    await this.recalcLikeCount(productId);
-    return { liked: false };
-  }
-
-  /** Публичный лайк/анлайк (user || visitorId) */
   async likePublic(
     productId: number,
     owner: LikeOwner,
-  ): Promise<{ liked: true }> {
+  ): Promise<{ liked: true; likeCount: number }> {
     const customerId = owner.customerId ?? null;
     const visitorId = owner.visitorId ?? null;
     if (!customerId && !visitorId) {
@@ -325,13 +278,18 @@ export class CatalogService {
       [productId, customerId, visitorId],
     );
     await this.recalcLikeCount(productId);
-    return { liked: true };
+
+    const cnt = await this.ds.query<{ c: string }[]>(
+      `SELECT like_count AS c FROM product WHERE product_id=$1 LIMIT 1`,
+      [productId],
+    );
+    return { liked: true, likeCount: Number(cnt[0]?.c ?? 0) };
   }
 
   async unlikePublic(
     productId: number,
     owner: LikeOwner,
-  ): Promise<{ liked: false }> {
+  ): Promise<{ liked: false; likeCount: number }> {
     const customerId = owner.customerId ?? null;
     const visitorId = owner.visitorId ?? null;
 
@@ -342,7 +300,11 @@ export class CatalogService {
       [productId, customerId, visitorId],
     );
     await this.recalcLikeCount(productId);
-    return { liked: false };
+    const cnt = await this.ds.query<{ c: string }[]>(
+      `SELECT like_count AS c FROM product WHERE product_id=$1 LIMIT 1`,
+      [productId],
+    );
+    return { liked: false, likeCount: Number(cnt[0]?.c ?? 0) };
   }
 
   async getFavoritesPublic(owner: LikeOwner): Promise<ProductRow[]> {
@@ -361,32 +323,84 @@ export class CatalogService {
     return rows;
   }
 
-  /* ===================== РЕЙТИНГИ ===================== */
+  /* ===================== РЕЙТИНГИ (user || visitor) ===================== */
 
-  async setRating(
+  async setRatingPublic(
     productId: number,
-    userId: number,
+    owner: RatingOwner,
     dto: SetRatingDto,
-  ): Promise<{ rating: number }> {
-    await this.ds.query(
-      `INSERT INTO review (product_id, customer_id, rating, comment)
-       VALUES ($1,$2,$3, NULLIF($4,'')) 
-       ON CONFLICT (product_id, customer_id)
-       DO UPDATE SET rating=EXCLUDED.rating, comment=EXCLUDED.comment, review_date=now()`,
-      [productId, userId, dto.rating, dto.comment ?? null],
+  ): Promise<{ avgRating: number; myRating: number }> {
+    const { customerId, visitorId } = owner;
+    if (!customerId && !visitorId)
+      throw new BadRequestException('owner required');
+
+    // upsert для user-конфликта
+    if (customerId) {
+      await this.ds.query(
+        `INSERT INTO review (product_id, customer_id, visitor_id, rating, comment)
+         VALUES ($1, $2, NULL, $3, NULLIF($4,''))
+         ON CONFLICT (product_id, customer_id)
+         DO UPDATE SET rating=EXCLUDED.rating, comment=EXCLUDED.comment, review_date=now()`,
+        [productId, customerId, dto.rating, dto.comment ?? null],
+      );
+    } else {
+      // upsert для гостя по visitor_id
+      await this.ds.query(
+        `INSERT INTO review (product_id, customer_id, visitor_id, rating, comment)
+         VALUES ($1, NULL, $2, $3, NULLIF($4,''))
+         ON CONFLICT (product_id, visitor_id)
+         DO UPDATE SET rating=EXCLUDED.rating, comment=EXCLUDED.comment, review_date=now()`,
+        [productId, visitorId, dto.rating, dto.comment ?? null],
+      );
+    }
+
+    const avgRow = await this.ds.query<{ avg: string }[]>(
+      `SELECT COALESCE(ROUND(AVG(rating)::numeric,2),0.00) AS avg FROM review WHERE product_id=$1`,
+      [productId],
     );
-    return { rating: dto.rating };
+    const myRow = await this.ds.query<{ r?: number }[]>(
+      `
+      SELECT rating AS r FROM review
+       WHERE product_id=$1
+         AND (
+           ($2::int  IS NOT NULL AND customer_id=$2)
+           OR
+           ($3::uuid IS NOT NULL AND visitor_id=$3)
+         )
+       LIMIT 1
+      `,
+      [productId, customerId ?? null, visitorId ?? null],
+    );
+
+    return {
+      avgRating: Number(avgRow[0]?.avg ?? 0),
+      myRating: Number(myRow[0]?.r ?? 0) || 0,
+    };
   }
 
-  async deleteRating(
+  async deleteRatingPublic(
     productId: number,
-    userId: number,
-  ): Promise<{ rating: null }> {
+    owner: RatingOwner,
+  ): Promise<{ avgRating: number; myRating: 0 }> {
+    const { customerId, visitorId } = owner;
     await this.ds.query(
-      `DELETE FROM review WHERE product_id=$1 AND customer_id=$2`,
-      [productId, userId],
+      `
+      DELETE FROM review
+       WHERE product_id=$1
+         AND (
+           ($2::int  IS NOT NULL AND customer_id=$2)
+           OR
+           ($3::uuid IS NOT NULL AND visitor_id=$3)
+         )`,
+      [productId, customerId ?? null, visitorId ?? null],
     );
-    return { rating: null };
+
+    const avgRow = await this.ds.query<{ avg: string }[]>(
+      `SELECT COALESCE(ROUND(AVG(rating)::numeric,2),0.00) AS avg FROM review WHERE product_id=$1`,
+      [productId],
+    );
+
+    return { avgRating: Number(avgRow[0]?.avg ?? 0), myRating: 0 };
   }
 
   /* ===================== КОММЕНТАРИИ ===================== */
@@ -473,7 +487,6 @@ export class CatalogService {
     collections: string[];
     popularity: string[];
   }> {
-    // Справочник по categories (kind='normal') берём из таблицы
     const rows = await this.ds.query<MetaRow[]>(
       `SELECT name, kind FROM category ORDER BY kind, name`,
     );
@@ -481,20 +494,18 @@ export class CatalogService {
       rows.filter((r) => r.kind === k).map((r) => r.name);
     return {
       categories: pick('normal'),
-      // Остальные теперь фиксированы — можно оставить жёстко/вернуть из конфига
       materials: ['Кожа', 'Металл', 'Силикон'],
       collections: ['business', 'limited', 'premium', 'autumn2025'],
       popularity: ['hit', 'new', 'recommended'],
     };
   }
 
-  getCategories = async (): Promise<Category[]> => {
-    return this.categories.find({ order: { name: 'ASC' } });
-  };
+  // Вспомогательные справочники, если нужно
+  getCategories = async (): Promise<Category[]> =>
+    this.categories.find({ order: { name: 'ASC' } });
 
-  getPhoneModels = async (): Promise<PhoneModel[]> => {
-    return this.models.find({ order: { brand: 'ASC', modelName: 'ASC' } });
-  };
+  getPhoneModels = async (): Promise<PhoneModel[]> =>
+    this.models.find({ order: { brand: 'ASC', modelName: 'ASC' } });
 
   async userRatingFor(
     productId: number,

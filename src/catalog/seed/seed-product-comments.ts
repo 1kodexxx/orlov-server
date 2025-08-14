@@ -1,5 +1,5 @@
 // src/database/seed/seed-product-comments.ts
-import { allProducts } from '../../data/products.data';
+import { allProducts } from '../../data1/products.data';
 
 export type SeedProductComment = {
   productId: number;
