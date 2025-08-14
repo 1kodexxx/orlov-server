@@ -52,6 +52,7 @@ export class Product {
   @JoinColumn({ name: 'phone_model_id' })
   phoneModel!: PhoneModel;
 
+  /* categories (обычные теги, kind='normal') остаются через join table */
   @ManyToMany(() => Category, { cascade: false })
   @JoinTable({
     name: 'product_category',
@@ -59,6 +60,16 @@ export class Product {
     inverseJoinColumn: { name: 'category_id', referencedColumnName: 'id' },
   })
   categories!: Category[];
+
+  /* Новые отдельные столбцы под фильтры */
+  @Column({ name: 'material', type: 'varchar', length: 20 })
+  material!: 'Кожа' | 'Металл' | 'Силикон';
+
+  @Column({ name: 'popularity', type: 'varchar', length: 20 })
+  popularity!: 'hit' | 'new' | 'recommended';
+
+  @Column({ name: 'collection', type: 'varchar', length: 20 })
+  collection!: 'business' | 'limited' | 'premium' | 'autumn2025';
 
   @Column({ name: 'view_count', type: 'bigint', default: () => '0' })
   viewCount!: number;

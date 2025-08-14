@@ -1,4 +1,3 @@
-// src/catalog/catalog.controller.ts
 import {
   BadRequestException,
   Body,
@@ -67,6 +66,7 @@ export class CatalogController {
     );
     const ua = String(req.headers['user-agent'] ?? '').trim();
 
+    // Совместимый вызов: сервис поддерживает и такую сигнатуру (5 аргументов)
     return this.service.addView(id, customerId, visitorId, ip, ua);
   }
 

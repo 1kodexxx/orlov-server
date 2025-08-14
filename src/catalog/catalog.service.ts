@@ -1,4 +1,3 @@
-// src/catalog/catalog.service.ts
 import {
   Injectable,
   BadRequestException,
@@ -13,7 +12,7 @@ import { AddCommentDto } from './dto/add-comment.dto';
 import { Category } from './entities/category.entity';
 import { PhoneModel } from './entities/phone-model.entity';
 
-/** Строка из VIEW v_product_full (минимально нужное для каталога/карточки) */
+/** Строка из VIEW v_product_full */
 export type ProductRow = {
   product_id: number;
   sku: string;
@@ -23,12 +22,17 @@ export type ProductRow = {
   view_count: number;
   like_count: number;
   avg_rating: number;
+  /** Новые scalar-поля из product */
+  material: 'Кожа' | 'Металл' | 'Силикон';
+  popularity: 'hit' | 'new' | 'recommended';
+  collection: 'business' | 'limited' | 'premium' | 'autumn2025';
   created_at: string;
   updated_at: string;
+  /** Массивы оставлены для обратной совместимости UI */
   categories: string[];
   materials: string[];
   collections: string[];
-  popularity: string[];
+  popularity_arr?: string[]; // массивная версия популярности, если нужна
   images?: string[] | Array<{ url: string; position: number }>;
 };
 
@@ -112,19 +116,23 @@ export class CatalogService {
     if (priceMin != null) qb.andWhere('vp.price >= :priceMin', { priceMin });
     if (priceMax != null) qb.andWhere('vp.price <= :priceMax', { priceMax });
 
-    // безопасные имена параметров + ANY(:param)
-    const anyFrom = (values: string[], fieldSql: string, param: string) => {
-      if (!values.length) return;
+    /* фильтры по scalar-колонкам */
+    if (materials.length) {
+      qb.andWhere('vp.material = ANY(:mats)', { mats: materials });
+    }
+    if (collections.length) {
+      qb.andWhere('vp.collection = ANY(:cols)', { cols: collections });
+    }
+    if (popularity.length) {
+      qb.andWhere('vp.popularity = ANY(:pops)', { pops: popularity });
+    }
+    /* обычные категории (kind='normal') — по массиву categories */
+    if (categories.length) {
       qb.andWhere(
-        `EXISTS (SELECT 1 FROM unnest(${fieldSql}) AS x(name) WHERE x.name = ANY(:${param}))`,
-        { [param]: values },
+        `EXISTS (SELECT 1 FROM unnest(vp.categories) AS x(name) WHERE x.name = ANY(:cats))`,
+        { cats: categories },
       );
-    };
-
-    anyFrom(categories, 'vp.categories', 'cats');
-    anyFrom(materials, 'vp.materials', 'mats');
-    anyFrom(collections, 'vp.collections', 'cols');
-    anyFrom(popularity, 'vp.popularity', 'pops');
+    }
 
     switch (sort) {
       case 'name_asc':
@@ -197,7 +205,7 @@ export class CatalogService {
     };
   }
 
-  /** Карточка товара (данные из v_product_full) */
+  /** Карточка товара */
   async findOne(id: number): Promise<ProductRow> {
     const row = await this.ds
       .createQueryBuilder()
@@ -210,7 +218,8 @@ export class CatalogService {
     return row;
   }
 
-  /** Просмотры: всем (аноним/юзер). Антинакрутка раз в сутки на владельца. */
+  /* ===================== ПРОСМОТРЫ ===================== */
+  // Перегрузки: поддерживаем и старый вызов с 5 аргументами, и новый с объектом.
   async addView(
     productId: number,
     opts: {
@@ -219,11 +228,47 @@ export class CatalogService {
       ip?: string | null;
       userAgent?: string | null;
     },
+  ): Promise<void>;
+  async addView(
+    productId: number,
+    customerId?: number | null,
+    visitorId?: string | null,
+    ip?: string | null,
+    userAgent?: string | null,
+  ): Promise<void>;
+
+  async addView(
+    productId: number,
+    a?:
+      | number
+      | {
+          customerId?: number | null;
+          visitorId?: string | null;
+          ip?: string | null;
+          userAgent?: string | null;
+        }
+      | null,
+    b?: string | null,
+    c?: string | null,
+    d?: string | null,
   ): Promise<void> {
-    const customerId = opts.customerId ?? null;
-    const visitorId = opts.visitorId ?? null;
-    const ip = opts.ip ?? null;
-    const userAgent = opts.userAgent ?? null;
+    // Нормализуем аргументы в объект
+    let customerId: number | null = null;
+    let visitorId: string | null = null;
+    let ip: string | null = null;
+    let userAgent: string | null = null;
+
+    if (typeof a === 'object' && a !== null) {
+      customerId = a.customerId ?? null;
+      visitorId = a.visitorId ?? null;
+      ip = a.ip ?? null;
+      userAgent = a.userAgent ?? null;
+    } else {
+      customerId = (a as number | null) ?? null;
+      visitorId = b ?? null;
+      ip = c ?? null;
+      userAgent = d ?? null;
+    }
 
     await this.ds.query(
       `
@@ -243,7 +288,6 @@ export class CatalogService {
 
   /* ===================== ЛАЙКИ ===================== */
 
-  /** Совместимость: лайк только авторизованным */
   async like(productId: number, userId: number): Promise<{ liked: true }> {
     await this.ds.query(
       `INSERT INTO product_like (product_id, customer_id) VALUES ($1,$2)
@@ -254,7 +298,6 @@ export class CatalogService {
     return { liked: true };
   }
 
-  /** Совместимость: снять лайк только авторизованным */
   async unlike(productId: number, userId: number): Promise<{ liked: false }> {
     await this.ds.query(
       `DELETE FROM product_like WHERE product_id=$1 AND customer_id=$2`,
@@ -264,7 +307,7 @@ export class CatalogService {
     return { liked: false };
   }
 
-  /** Публичный лайк: авторизованный или гость по visitorId. Идемпотентно. */
+  /** Публичный лайк/анлайк (user || visitorId) */
   async likePublic(
     productId: number,
     owner: LikeOwner,
@@ -285,7 +328,6 @@ export class CatalogService {
     return { liked: true };
   }
 
-  /** Публичное снятие лайка. */
   async unlikePublic(
     productId: number,
     owner: LikeOwner,
@@ -303,7 +345,6 @@ export class CatalogService {
     return { liked: false };
   }
 
-  /** Публичное избранное: если есть user — по нему, иначе — по visitorId */
   async getFavoritesPublic(owner: LikeOwner): Promise<ProductRow[]> {
     const customerId = owner.customerId ?? null;
     const visitorId = owner.visitorId ?? null;
@@ -354,7 +395,13 @@ export class CatalogService {
     productId: number,
     page = 1,
     limit = 20,
-  ): Promise<Paged<CommentRow>> {
+  ): Promise<{
+    items: CommentRow[];
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  }> {
     const itemsPromise = this.ds.query<CommentRow[]>(
       `SELECT 
          c.comment_id AS id,
@@ -418,7 +465,7 @@ export class CatalogService {
     return { ok: true };
   }
 
-  /* ===================== МЕТАДАННЫЕ/СПРАВОЧНИКИ ===================== */
+  /* ===================== МЕТА ===================== */
 
   async getMeta(): Promise<{
     categories: string[];
@@ -426,6 +473,7 @@ export class CatalogService {
     collections: string[];
     popularity: string[];
   }> {
+    // Справочник по categories (kind='normal') берём из таблицы
     const rows = await this.ds.query<MetaRow[]>(
       `SELECT name, kind FROM category ORDER BY kind, name`,
     );
@@ -433,9 +481,10 @@ export class CatalogService {
       rows.filter((r) => r.kind === k).map((r) => r.name);
     return {
       categories: pick('normal'),
-      materials: pick('material'),
-      collections: pick('collection'),
-      popularity: pick('popularity'),
+      // Остальные теперь фиксированы — можно оставить жёстко/вернуть из конфига
+      materials: ['Кожа', 'Металл', 'Силикон'],
+      collections: ['business', 'limited', 'premium', 'autumn2025'],
+      popularity: ['hit', 'new', 'recommended'],
     };
   }
 
