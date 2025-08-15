@@ -1,6 +1,4 @@
-// src/database/seed/seed-products.ts
-import 'dotenv/config';
-import dataSource from '../data-source';
+import { DataSource } from 'typeorm';
 import { allProducts } from '../../data1/products.data';
 
 type SeedProduct = {
@@ -19,7 +17,7 @@ type SeedProduct = {
   avgRating?: number; // -> product.avg_rating
 };
 
-const seedProducts: SeedProduct[] = allProducts.map((p) => ({
+const seedProductsData: SeedProduct[] = allProducts.map((p) => ({
   id: p.id,
   slug: p.slug,
   name: p.name,
@@ -46,8 +44,8 @@ const slugify = (s: string) =>
     .replace(/\s/g, '-');
 
 /** Проверить занятость slugs (учитывая unique index по lower(slug)) */
-async function slugExists(slug: string): Promise<boolean> {
-  const rows = await dataSource.query<{ exists: boolean }[]>(
+async function slugExists(ds: DataSource, slug: string): Promise<boolean> {
+  const rows = await ds.query<{ exists: boolean }[]>(
     `SELECT EXISTS(
        SELECT 1 FROM category WHERE lower(slug) = lower($1)
      ) AS exists`,
@@ -57,13 +55,13 @@ async function slugExists(slug: string): Promise<boolean> {
 }
 
 /** Подобрать уникальный slug с суффиксом -2, -3, ... если нужно */
-async function ensureUniqueSlug(base: string): Promise<string> {
+async function ensureUniqueSlug(ds: DataSource, base: string): Promise<string> {
   const attempt = base || 'item';
-  if (!(await slugExists(attempt))) return attempt;
+  if (!(await slugExists(ds, attempt))) return attempt;
 
   for (let i = 2; i < 1000; i++) {
     const candidate = `${base}-${i}`;
-    if (!(await slugExists(candidate))) return candidate;
+    if (!(await slugExists(ds, candidate))) return candidate;
   }
 
   // на всякий случай добавим timestamp-хвост
@@ -79,11 +77,15 @@ type Kind = 'normal' | 'material' | 'collection' | 'popularity';
  * При вставке подбираем уникальный slug.
  * При конфликте по name — только обновляем kind, slug НЕ трогаем (чтобы не словить конфликт по slug).
  */
-async function upsertCategoryByName(name: string, kind: Kind): Promise<number> {
+async function upsertCategoryByName(
+  ds: DataSource,
+  name: string,
+  kind: Kind,
+): Promise<number> {
   const baseSlug = slugify(name);
-  const uniqueSlug = await ensureUniqueSlug(baseSlug);
+  const uniqueSlug = await ensureUniqueSlug(ds, baseSlug);
 
-  const row = await dataSource.query(
+  const row = await ds.query(
     `INSERT INTO category(name, slug, kind)
        VALUES ($1, $2, $3)
        ON CONFLICT (name)
@@ -94,23 +96,23 @@ async function upsertCategoryByName(name: string, kind: Kind): Promise<number> {
   return row[0].category_id as number;
 }
 
-async function upsertCategoryNormal(name: string) {
-  return upsertCategoryByName(name, 'normal');
-}
-async function upsertCategoryMaterial(name: string) {
-  return upsertCategoryByName(name, 'material');
-}
-async function upsertCategoryPopularity(name: string) {
-  return upsertCategoryByName(name, 'popularity');
-}
-async function upsertCategoryCollection(name: string) {
-  return upsertCategoryByName(name, 'collection');
-}
+const upsertCategoryNormal = (ds: DataSource, n: string) =>
+  upsertCategoryByName(ds, n, 'normal');
+const upsertCategoryMaterial = (ds: DataSource, n: string) =>
+  upsertCategoryByName(ds, n, 'material');
+const upsertCategoryPopularity = (ds: DataSource, n: string) =>
+  upsertCategoryByName(ds, n, 'popularity');
+const upsertCategoryCollection = (ds: DataSource, n: string) =>
+  upsertCategoryByName(ds, n, 'collection');
 
 /* ---------------- phone model ---------------- */
 
-async function upsertPhoneModel(brand = 'Universal', model = 'Any') {
-  const row = await dataSource.query(
+async function upsertPhoneModel(
+  ds: DataSource,
+  brand = 'Universal',
+  model = 'Any',
+) {
+  const row = await ds.query(
     `INSERT INTO phone_model(brand, model_name)
      VALUES ($1,$2)
      ON CONFLICT (brand, model_name) DO UPDATE SET brand=EXCLUDED.brand
@@ -122,8 +124,12 @@ async function upsertPhoneModel(brand = 'Universal', model = 'Any') {
 
 /* ---------------- product & links ---------------- */
 
-async function upsertProduct(p: SeedProduct, phoneModelId: number) {
-  const row = await dataSource.query(
+async function upsertProduct(
+  ds: DataSource,
+  p: SeedProduct,
+  phoneModelId: number,
+) {
+  const row = await ds.query(
     `INSERT INTO product (
         product_id, sku, name, description, price, stock_quantity,
         phone_model_id, view_count, like_count, avg_rating,
@@ -160,80 +166,70 @@ async function upsertProduct(p: SeedProduct, phoneModelId: number) {
   return row[0].product_id as number;
 }
 
-async function ensureImage(productId: number, url: string, ord: number) {
-  await dataSource.query(
+const ensureImage = (
+  ds: DataSource,
+  productId: number,
+  url: string,
+  ord: number,
+) =>
+  ds.query(
     `INSERT INTO product_image (product_id, url, "position")
      VALUES ($1, $2, $3)
      ON CONFLICT (product_id, url) DO NOTHING`,
     [productId, url, ord],
   );
-}
 
-async function linkCategory(productId: number, categoryId: number) {
-  await dataSource.query(
+const linkCategory = (ds: DataSource, productId: number, categoryId: number) =>
+  ds.query(
     `INSERT INTO product_category(product_id, category_id)
      VALUES ($1,$2)
      ON CONFLICT DO NOTHING`,
     [productId, categoryId],
   );
-}
 
 /* ---------------- seed meta dictionaries ---------------- */
 
-async function ensureMetaDictionaries() {
+async function ensureMetaDictionaries(ds: DataSource) {
   // materials
-  await upsertCategoryMaterial('Кожа');
-  await upsertCategoryMaterial('Металл');
-  await upsertCategoryMaterial('Силикон');
+  await upsertCategoryMaterial(ds, 'Кожа');
+  await upsertCategoryMaterial(ds, 'Металл');
+  await upsertCategoryMaterial(ds, 'Силикон');
 
   // popularity
-  await upsertCategoryPopularity('hit');
-  await upsertCategoryPopularity('new');
-  await upsertCategoryPopularity('recommended');
+  await upsertCategoryPopularity(ds, 'hit');
+  await upsertCategoryPopularity(ds, 'new');
+  await upsertCategoryPopularity(ds, 'recommended');
 
   // collections
-  await upsertCategoryCollection('business');
-  await upsertCategoryCollection('limited');
-  await upsertCategoryCollection('premium');
-  await upsertCategoryCollection('autumn2025');
+  await upsertCategoryCollection(ds, 'business');
+  await upsertCategoryCollection(ds, 'limited');
+  await upsertCategoryCollection(ds, 'premium');
+  await upsertCategoryCollection(ds, 'autumn2025');
 }
 
-/* ---------------- main ---------------- */
+/* ---------------- public API ---------------- */
 
-async function main() {
-  await dataSource.initialize();
-  console.log('> DB connected');
+export async function seedProducts(ds: DataSource) {
+  console.log('> Seeding products…');
 
-  // справочники для фильтров
-  await ensureMetaDictionaries();
+  await ensureMetaDictionaries(ds);
 
-  const phoneModelId = await upsertPhoneModel();
+  const phoneModelId = await upsertPhoneModel(ds);
 
-  for (const p of seedProducts) {
-    const productId = await upsertProduct(p, phoneModelId);
+  for (const p of seedProductsData) {
+    const productId = await upsertProduct(ds, p, phoneModelId);
 
     // images
     for (let i = 0; i < p.images.length; i++) {
-      await ensureImage(productId, p.images[i], i + 1);
+      await ensureImage(ds, productId, p.images[i], i + 1);
     }
 
     // normal categories
     for (const c of p.categories) {
-      const catId = await upsertCategoryNormal(c);
-      await linkCategory(productId, catId);
+      const catId = await upsertCategoryNormal(ds, c);
+      await linkCategory(ds, productId, catId);
     }
   }
 
-  console.log(`✓ Seeded ${seedProducts.length} products`);
-  await dataSource.destroy();
+  console.log(`✓ Seeded ${seedProductsData.length} products`);
 }
-
-main().catch(async (e) => {
-  console.error(e);
-  try {
-    await dataSource.destroy();
-  } catch {
-    // ignore
-  }
-  process.exit(1);
-});

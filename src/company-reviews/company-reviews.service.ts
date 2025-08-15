@@ -1,4 +1,3 @@
-// src/company-reviews/company-reviews.service.ts
 import {
   Injectable,
   ForbiddenException,
@@ -7,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import { CompanyReview } from './company-reviews.entity';
+import { CreateCompanyReviewDto } from './dto/create-company-review.dto';
 
 export type CompanyStats = {
   avg_company_rating: number;
@@ -24,12 +24,13 @@ export class CompanyReviewsService {
     private readonly repo: Repository<CompanyReview>,
   ) {}
 
-  async create(dto: { rating: number; text: string }, customerId: number) {
+  // создаём без рейтинга в DTO — внутри ставим rating = 5 и сразу одобряем
+  async create(dto: CreateCompanyReviewDto, customerId: number) {
     const entity = this.repo.create({
       customerId,
-      rating: dto.rating,
       text: dto.text,
-      isApproved: false,
+      rating: 5,
+      isApproved: true,
     });
     return this.repo.save(entity);
   }
@@ -81,22 +82,11 @@ export class CompanyReviewsService {
 
     const isOwner = review.customerId === actor.id;
     const isAdmin = actor.role === 'admin';
-
-    if (isOwner && review.isApproved) {
-      throw new ForbiddenException(
-        'Approved review can be edited by admin only',
-      );
-    }
     if (!isOwner && !isAdmin) {
       throw new ForbiddenException('You cannot edit this review');
     }
 
-    // не-админу запрещаем менять isApproved — убираем поле без any
-    const payload: UpdatableFields = !isAdmin
-      ? (({ rating, text }) => ({ rating, text }))(dto)
-      : dto;
-
-    Object.assign(review, payload);
+    Object.assign(review, dto);
     return this.repo.save(review);
   }
 
@@ -114,11 +104,7 @@ export class CompanyReviewsService {
     const isOwner = review.customerId === actor.id;
     const isAdmin = actor.role === 'admin';
 
-    if (review.isApproved && !isAdmin) {
-      throw new ForbiddenException(
-        'Approved review can be deleted by admin only',
-      );
-    }
+    // владельцу и админу можно удалять всегда
     if (!isOwner && !isAdmin) {
       throw new ForbiddenException('You cannot delete this review');
     }
@@ -132,17 +118,13 @@ export class CompanyReviewsService {
     }> = await this.repo.query(`SELECT * FROM company_rating_view`);
 
     const r = rows[0] ?? { avg_company_rating: 0, reviews_count: 0 };
-
-    const avgRaw = r.avg_company_rating;
-    const cntRaw = r.reviews_count;
-
     const avg =
-      avgRaw == null
+      r.avg_company_rating == null
         ? 0
-        : typeof avgRaw === 'string'
-          ? parseFloat(avgRaw)
-          : avgRaw;
-    const count = cntRaw == null ? 0 : Number(cntRaw);
+        : typeof r.avg_company_rating === 'string'
+          ? parseFloat(r.avg_company_rating)
+          : r.avg_company_rating;
+    const count = r.reviews_count == null ? 0 : Number(r.reviews_count);
 
     return {
       avg_company_rating: Number.isFinite(avg) ? avg : 0,

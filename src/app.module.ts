@@ -9,6 +9,7 @@ import { ViewsModule } from './views/views.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { FavoritesModule } from './favorites/favorites.module';
 import { VisitorIdMiddleware } from './common/visitor/visitor-id.middleware';
+import { CompanyReviewsModule } from './company-reviews/company-reviews.module';
 
 @Module({
   imports: [
@@ -17,7 +18,7 @@ import { VisitorIdMiddleware } from './common/visitor/visitor-id.middleware';
     CatalogModule,
     FavoritesModule,
     AuthModule,
-
+    CompanyReviewsModule,
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],

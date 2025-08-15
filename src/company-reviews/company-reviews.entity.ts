@@ -8,7 +8,7 @@ import {
   UpdateDateColumn,
   JoinColumn,
 } from 'typeorm';
-import { User } from '../users/users.entity'; // проверь путь к сущности пользователя
+import { User } from '../users/users.entity';
 
 @Entity({ name: 'company_reviews' })
 export class CompanyReview {
@@ -22,8 +22,8 @@ export class CompanyReview {
   @Column({ name: 'customer_id', type: 'int' })
   customerId!: number;
 
-  @Column({ type: 'smallint' })
-  rating!: number; // 1–5
+  @Column({ type: 'smallint', nullable: true })
+  rating!: number | null;
 
   @Column({ type: 'text' })
   text!: string;

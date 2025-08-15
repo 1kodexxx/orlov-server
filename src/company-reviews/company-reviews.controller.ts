@@ -1,4 +1,3 @@
-// src/company-reviews/company-reviews.controller.ts
 import {
   Body,
   Controller,
@@ -13,7 +12,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { CompanyReviewsService, CompanyStats } from './company-reviews.service';
+import { CompanyReviewsService } from './company-reviews.service';
 import { CreateCompanyReviewDto } from './dto/create-company-review.dto';
 import { UpdateCompanyReviewDto } from './dto/update-company-review.dto';
 import { QueryCompanyReviewDto } from './dto/query-company-review.dto';
@@ -32,10 +31,11 @@ function getJwtUser(req: Request): JwtPayload {
 export class CompanyReviewsController {
   constructor(private readonly service: CompanyReviewsService) {}
 
-  // Публичный список: по умолчанию только одобренные
+  // Публичный список: ТЕПЕРЬ ПО УМОЛЧАНИЮ — БЕЗ МОДЕРАЦИИ (все отзывы)
   @Get()
   async list(@Query() q: QueryCompanyReviewDto) {
-    const approvedOnly = q.approved ? q.approved === 'true' : true;
+    // если approved не передан — показываем все
+    const approvedOnly = q.approved ? q.approved === 'true' : false;
     const page = q.page ?? 1;
     const limit = q.limit ?? 20;
 
@@ -80,7 +80,7 @@ export class CompanyReviewsController {
     return this.service.create(dto, user.sub);
   }
 
-  // Обновить: владелец (до одобрения) или админ
+  // Обновить: владелец или админ (без привязки к isApproved)
   @UseGuards(JwtAuthGuard)
   @Patch(':id')
   async update(
@@ -92,7 +92,7 @@ export class CompanyReviewsController {
     return this.service.update(id, dto, { id: user.sub, role: user.role });
   }
 
-  // Одобрить (admin)
+  // Одобрить (admin) — оставляем как no-op опцию (или можно удалить эндпоинт)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @Post(':id/approve')
@@ -101,18 +101,12 @@ export class CompanyReviewsController {
     return this.service.approve(id, user.role);
   }
 
-  // Удалить: владелец (если не одобрено) или админ
+  // Удалить: владелец или админ (без учета isApproved)
   @UseGuards(JwtAuthGuard)
   @Delete(':id')
   async remove(@Param('id') id: string, @Req() req: Request) {
     const user = getJwtUser(req);
     await this.service.remove(id, { id: user.sub, role: user.role });
     return { success: true };
-  }
-
-  // Статистика
-  @Get('stats')
-  async stats(): Promise<CompanyStats> {
-    return this.service.stats();
   }
 }
