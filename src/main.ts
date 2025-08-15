@@ -20,10 +20,13 @@ async function bootstrap() {
   });
   const logger = new Logger('Bootstrap');
 
+  // полезно для корректной работы X-Forwarded-* на Railway/Render
+  app.set('trust proxy', 1);
+
   const http = app.getHttpAdapter().getInstance();
   http.disable('x-powered-by');
 
-  // 1) Helmet — разрешаем картинки и ресурсы кросс-оригин (полезно в деве)
+  // 1) Helmet
   const asHelmet: (opts?: HelmetOptions) => RequestHandler =
     helmet as unknown as (opts?: HelmetOptions) => RequestHandler;
 
@@ -33,14 +36,13 @@ async function bootstrap() {
     contentSecurityPolicy: {
       useDefaults: true,
       directives: {
-        // Разрешаем изображения с нашего сервера + data:/blob:
         'img-src': ["'self'", 'data:', 'blob:', 'http:', 'https:'],
       },
     },
   };
   app.use(asHelmet(helmetOptions));
 
-  // 2) CORS (белый список через CORS_ORIGINS, в деве добавь http://localhost:5173)
+  // 2) CORS через белый список
   const allowlist = (process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map((s) => s.trim())
@@ -66,7 +68,7 @@ async function bootstrap() {
   ) => RequestHandler;
   app.use(asCookieParser(String(process.env.COOKIE_SECRET ?? '')));
 
-  // 4) Явная раздача /uploads (без дублирования через ServeStaticModule)
+  // 4) Статика /uploads
   app.use(
     '/uploads',
     express.static(join(process.cwd(), 'uploads'), {
@@ -76,7 +78,7 @@ async function bootstrap() {
     }),
   );
 
-  // 5) Глобальные пайпы/интерцепторы
+  // 5) Общие пайпы/интерцепторы
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,
@@ -86,13 +88,16 @@ async function bootstrap() {
   );
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
 
+  // (опционально) общий префикс, чтобы фронту было проще
+  // app.setGlobalPrefix('api');
+
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);
   logger.log(`🚀 Сервер запущен на http://localhost:${port}`);
 }
 
-bootstrap().catch(() => {
+bootstrap().catch((err) => {
   const logger = new Logger('Bootstrap');
-  logger.error('❌ Критическая ошибка запуска');
+  logger.error('❌ Критическая ошибка запуска', err);
   process.exit(1);
 });
