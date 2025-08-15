@@ -1,13 +1,13 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class SquashedAccountCatalogFinal1710000013000
-  implements MigrationInterface
-{
-  name = 'SquashedAccountCatalogFinal1710000013000';
+export class BaselineSquashed1723700000000 implements MigrationInterface {
+  name = 'BaselineSquashed1723700000000';
 
   public async up(q: QueryRunner): Promise<void> {
     await q.query(`
-      /* ---------- prerequisites ---------- */
+      /* =========================
+         0) prerequisites
+      ========================== */
       DO $$ BEGIN
         PERFORM 1 FROM pg_language WHERE lanname = 'plpgsql';
         IF NOT FOUND THEN CREATE LANGUAGE plpgsql; END IF;
@@ -15,7 +15,9 @@ export class SquashedAccountCatalogFinal1710000013000
 
       CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
-      /* ---------- core tables ---------- */
+      /* =========================
+         1) core tables
+      ========================== */
 
       CREATE TABLE IF NOT EXISTS phone_model (
         model_id     SERIAL PRIMARY KEY,
@@ -38,6 +40,7 @@ export class SquashedAccountCatalogFinal1710000013000
         CONSTRAINT category_kind_check
           CHECK (kind IN ('normal','material','collection','popularity'))
       );
+
       DO $$
       BEGIN
         IF NOT EXISTS (
@@ -49,6 +52,7 @@ export class SquashedAccountCatalogFinal1710000013000
           ADD CONSTRAINT uq_category_slug UNIQUE (slug);
         END IF;
       END $$;
+
       CREATE UNIQUE INDEX IF NOT EXISTS ux_category_slug_lower ON category (lower(slug));
       CREATE INDEX IF NOT EXISTS idx_category_parent     ON category(parent_id);
       CREATE INDEX IF NOT EXISTS idx_category_kind       ON category(kind);
@@ -175,7 +179,7 @@ export class SquashedAccountCatalogFinal1710000013000
         status           VARCHAR(50)
       );
 
-      /* ---------------- reviews (товар) — теперь и гости тоже ---------------- */
+      /* -------- reviews (товар) — пользователи и гости -------- */
       CREATE TABLE IF NOT EXISTS review (
         review_id   SERIAL PRIMARY KEY,
         product_id  INT NOT NULL REFERENCES product(product_id) ON DELETE CASCADE,
@@ -190,13 +194,8 @@ export class SquashedAccountCatalogFinal1710000013000
             (customer_id IS NULL AND visitor_id IS NOT NULL)
           )
       );
-      /* уникальность оценки на продукт от конкретного субъекта */
-      CREATE UNIQUE INDEX IF NOT EXISTS ux_review_customer
-        ON review(product_id, customer_id) WHERE customer_id IS NOT NULL;
-      CREATE UNIQUE INDEX IF NOT EXISTS ux_review_visitor
-        ON review(product_id, visitor_id) WHERE visitor_id IS NOT NULL;
 
-      /* ---------------- likes — гости и пользователи ---------------- */
+      /* -------- likes — пользователи и гости -------- */
       CREATE TABLE IF NOT EXISTS product_like (
         id          BIGSERIAL PRIMARY KEY,
         product_id  INT NOT NULL REFERENCES product(product_id) ON DELETE CASCADE,
@@ -209,12 +208,8 @@ export class SquashedAccountCatalogFinal1710000013000
             OR (customer_id IS NULL AND visitor_id IS NOT NULL)
           )
       );
-      CREATE UNIQUE INDEX IF NOT EXISTS ux_product_like_user
-        ON product_like(product_id, customer_id) WHERE customer_id IS NOT NULL;
-      CREATE UNIQUE INDEX IF NOT EXISTS ux_product_like_visitor
-        ON product_like(product_id, visitor_id) WHERE visitor_id IS NOT NULL;
 
-      /* ---------------- favorites (избранное) — отдельная сущность ---------------- */
+      /* -------- избранное -------- */
       CREATE TABLE IF NOT EXISTS product_favorite (
         id          BIGSERIAL PRIMARY KEY,
         product_id  INT NOT NULL REFERENCES product(product_id) ON DELETE CASCADE,
@@ -227,12 +222,8 @@ export class SquashedAccountCatalogFinal1710000013000
             OR (customer_id IS NULL AND visitor_id IS NOT NULL)
           )
       );
-      CREATE UNIQUE INDEX IF NOT EXISTS ux_product_favorite_user
-        ON product_favorite(product_id, customer_id) WHERE customer_id IS NOT NULL;
-      CREATE UNIQUE INDEX IF NOT EXISTS ux_product_favorite_visitor
-        ON product_favorite(product_id, visitor_id) WHERE visitor_id IS NOT NULL;
 
-      /* ---------------- просмотры — считаем только на странице товара ---------------- */
+      /* -------- просмотры -------- */
       CREATE TABLE IF NOT EXISTS product_view (
         view_id     SERIAL PRIMARY KEY,
         product_id  INT NOT NULL REFERENCES product(product_id) ON DELETE CASCADE,
@@ -243,34 +234,8 @@ export class SquashedAccountCatalogFinal1710000013000
         viewed_at   timestamptz NOT NULL DEFAULT now(),
         viewed_date DATE
       );
-      CREATE OR REPLACE FUNCTION set_viewed_date()
-      RETURNS TRIGGER AS $$
-      BEGIN
-        NEW.viewed_date := NEW.viewed_at::date;
-        RETURN NEW;
-      END; $$ LANGUAGE plpgsql;
-      DROP TRIGGER IF EXISTS trg_set_viewed_date ON product_view;
-      CREATE TRIGGER trg_set_viewed_date
-      BEFORE INSERT ON product_view
-      FOR EACH ROW
-      EXECUTE FUNCTION set_viewed_date();
 
-      DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM pg_indexes WHERE indexname = 'ux_product_view_daily_guard'
-        ) THEN
-          CREATE UNIQUE INDEX ux_product_view_daily_guard
-            ON product_view(
-              product_id,
-              COALESCE(customer_id, -1),
-              COALESCE(visitor_id, '00000000-0000-0000-0000-000000000000'::uuid),
-              viewed_date
-            );
-        END IF;
-      END $$;
-
-      /* ---------------- комментарии — только зарегистрированные ---------------- */
+      /* -------- комментарии -------- */
       CREATE TABLE IF NOT EXISTS comment (
         comment_id        SERIAL PRIMARY KEY,
         product_id        INT NOT NULL REFERENCES product(product_id) ON DELETE CASCADE,
@@ -280,7 +245,7 @@ export class SquashedAccountCatalogFinal1710000013000
         created_at        timestamptz NOT NULL DEFAULT now()
       );
 
-      /* ---------------- отзывы о компании — только зарегистрированные ---------------- */
+      /* -------- отзывы о компании -------- */
       CREATE TABLE IF NOT EXISTS company_reviews (
         id           BIGSERIAL PRIMARY KEY,
         customer_id  INTEGER NOT NULL REFERENCES customer(customer_id) ON DELETE CASCADE,
@@ -290,18 +255,13 @@ export class SquashedAccountCatalogFinal1710000013000
         created_at   timestamptz NOT NULL DEFAULT now(),
         updated_at   timestamptz NOT NULL DEFAULT now()
       );
-      CREATE INDEX IF NOT EXISTS idx_company_reviews_customer    ON company_reviews(customer_id);
-      CREATE INDEX IF NOT EXISTS idx_company_reviews_is_approved ON company_reviews(is_approved);
-      CREATE INDEX IF NOT EXISTS idx_company_reviews_created_at  ON company_reviews(created_at);
 
-      /* ---------- guests & cart ---------- */
-
+      /* -------- гости и корзина -------- */
       CREATE TABLE IF NOT EXISTS guest_session (
         id UUID PRIMARY KEY,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         last_seen  TIMESTAMPTZ NOT NULL DEFAULT now()
       );
-      CREATE INDEX IF NOT EXISTS idx_guest_session_last_seen ON guest_session(last_seen);
 
       CREATE TABLE IF NOT EXISTS cart (
         id BIGSERIAL PRIMARY KEY,
@@ -314,10 +274,6 @@ export class SquashedAccountCatalogFinal1710000013000
           (customer_id IS NULL AND guest_id IS NOT NULL)
         )
       );
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_cart_customer
-        ON cart(customer_id) WHERE customer_id IS NOT NULL;
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_cart_guest
-        ON cart(guest_id) WHERE guest_id IS NOT NULL;
 
       CREATE TABLE IF NOT EXISTS cart_item (
         id BIGSERIAL PRIMARY KEY,
@@ -328,7 +284,70 @@ export class SquashedAccountCatalogFinal1710000013000
         UNIQUE(cart_id, product_id)
       );
 
-      /* ---------- functions & triggers ---------- */
+      /* =========================
+         2) indexes
+      ========================== */
+      CREATE INDEX IF NOT EXISTS idx_product_phone_model_id       ON product(phone_model_id);
+      CREATE INDEX IF NOT EXISTS idx_product_category_category_id ON product_category(category_id);
+      CREATE INDEX IF NOT EXISTS idx_orders_customer              ON orders(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_orders_shipping_address      ON orders(shipping_address_id);
+      CREATE INDEX IF NOT EXISTS idx_order_item_order             ON order_item(order_id);
+      CREATE INDEX IF NOT EXISTS idx_order_item_product           ON order_item(product_id);
+      CREATE INDEX IF NOT EXISTS idx_payment_order                ON payment(order_id);
+      CREATE INDEX IF NOT EXISTS idx_shipment_order               ON shipment(order_id);
+
+      CREATE INDEX IF NOT EXISTS idx_review_product               ON review(product_id);
+      CREATE INDEX IF NOT EXISTS idx_review_customer              ON review(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_review_visitor               ON review(visitor_id);
+
+      CREATE INDEX IF NOT EXISTS idx_product_like_product         ON product_like(product_id);
+      CREATE INDEX IF NOT EXISTS idx_product_like_customer        ON product_like(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_product_like_visitor         ON product_like(visitor_id);
+
+      CREATE INDEX IF NOT EXISTS idx_product_favorite_product     ON product_favorite(product_id);
+      CREATE INDEX IF NOT EXISTS idx_product_favorite_customer    ON product_favorite(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_product_favorite_visitor     ON product_favorite(visitor_id);
+
+      CREATE INDEX IF NOT EXISTS idx_product_view_product         ON product_view(product_id);
+      CREATE INDEX IF NOT EXISTS idx_product_view_customer        ON product_view(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_product_view_visitor         ON product_view(visitor_id);
+
+      CREATE INDEX IF NOT EXISTS idx_comment_product              ON comment(product_id);
+      CREATE INDEX IF NOT EXISTS idx_comment_parent               ON comment(parent_comment_id);
+
+      /* поиск/сортировка каталога */
+      CREATE INDEX IF NOT EXISTS idx_product_name_trgm    ON product USING GIN (name gin_trgm_ops);
+      CREATE INDEX IF NOT EXISTS idx_product_price        ON product(price);
+      CREATE INDEX IF NOT EXISTS idx_product_created_at   ON product(created_at);
+      CREATE INDEX IF NOT EXISTS idx_product_avg_rating   ON product(avg_rating);
+      CREATE INDEX IF NOT EXISTS idx_product_like_count   ON product(like_count);
+      CREATE INDEX IF NOT EXISTS idx_product_view_count   ON product(view_count);
+
+      /* фильтры */
+      CREATE INDEX IF NOT EXISTS idx_product_material     ON product(material);
+      CREATE INDEX IF NOT EXISTS idx_product_popularity   ON product(popularity);
+      CREATE INDEX IF NOT EXISTS idx_product_collection   ON product(collection);
+
+      CREATE INDEX IF NOT EXISTS idx_guest_session_last_seen ON guest_session(last_seen);
+
+      /* уникальности (единые имена) */
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_review_product_customer
+        ON review(product_id, customer_id) WHERE customer_id IS NOT NULL;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_review_product_visitor
+        ON review(product_id, visitor_id) WHERE visitor_id IS NOT NULL;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_product_view_daily
+        ON product_view (
+          product_id,
+          COALESCE(customer_id, -1),
+          COALESCE(visitor_id, '00000000-0000-0000-0000-000000000000'::uuid),
+          viewed_date
+        );
+
+      /* =========================
+         3) functions & triggers
+      ========================== */
 
       CREATE OR REPLACE FUNCTION touch_updated_at() RETURNS TRIGGER AS $$
       BEGIN
@@ -380,6 +399,18 @@ export class SquashedAccountCatalogFinal1710000013000
       END $$ LANGUAGE plpgsql;
       CREATE TRIGGER trg_like_update_forbid BEFORE UPDATE ON product_like
         FOR EACH ROW EXECUTE FUNCTION product_like_forbid_update();
+
+      CREATE OR REPLACE FUNCTION set_viewed_date()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        NEW.viewed_date := NEW.viewed_at::date;
+        RETURN NEW;
+      END; $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS trg_set_viewed_date ON product_view;
+      CREATE TRIGGER trg_set_viewed_date
+      BEFORE INSERT ON product_view
+      FOR EACH ROW
+      EXECUTE FUNCTION set_viewed_date();
 
       CREATE OR REPLACE FUNCTION inc_view_count()
       RETURNS TRIGGER AS $$
@@ -435,7 +466,7 @@ export class SquashedAccountCatalogFinal1710000013000
       CREATE TRIGGER trg_order_item_recalc_delete AFTER DELETE ON order_item
         FOR EACH ROW EXECUTE FUNCTION recalc_order_total();
 
-      /* ---------- enum-like checks for product filters ---------- */
+      /* enum-like checks для product */
       DO $$
       BEGIN
         IF NOT EXISTS (
@@ -466,7 +497,7 @@ export class SquashedAccountCatalogFinal1710000013000
         END IF;
       END $$;
 
-      /* Значения по умолчанию, если NULL (на случай существующих данных) */
+      /* backfill на случай наличия данных */
       UPDATE product SET material='Кожа'       WHERE material   IS NULL;
       UPDATE product SET popularity='new'      WHERE popularity IS NULL;
       UPDATE product SET collection='business' WHERE collection IS NULL;
@@ -476,7 +507,9 @@ export class SquashedAccountCatalogFinal1710000013000
         ALTER COLUMN popularity SET NOT NULL,
         ALTER COLUMN collection SET NOT NULL;
 
-      /* ---------- views ---------- */
+      /* =========================
+         4) view
+      ========================== */
       DROP VIEW IF EXISTS v_product_full;
       CREATE VIEW v_product_full AS
       SELECT
@@ -490,13 +523,11 @@ export class SquashedAccountCatalogFinal1710000013000
         p.view_count,
         p.like_count,
         p.avg_rating::numeric(3,2) AS avg_rating,
-        /* scalar filters */
         p.material,
         p.popularity,
         p.collection,
         p.created_at,
         p.updated_at,
-        /* images as ordered jsonb */
         COALESCE(
           jsonb_agg(
             jsonb_build_object('url', pi.url, 'position', pi.position)
@@ -504,9 +535,7 @@ export class SquashedAccountCatalogFinal1710000013000
           ) FILTER (WHERE pi.url IS NOT NULL),
           '[]'::jsonb
         ) AS images,
-        /* normal categories */
         COALESCE(array_agg(DISTINCT c.name) FILTER (WHERE c.kind = 'normal'), ARRAY[]::text[]) AS categories,
-        /* back-compat arrays */
         ARRAY[p.material]   AS materials,
         ARRAY[p.collection] AS collections,
         ARRAY[p.popularity] AS popularity_arr
@@ -516,51 +545,42 @@ export class SquashedAccountCatalogFinal1710000013000
       LEFT JOIN category        c  ON c.category_id = pc.category_id
       GROUP BY p.product_id;
 
-      /* ---------- supporting indexes ---------- */
-      CREATE INDEX IF NOT EXISTS idx_product_phone_model_id       ON product(phone_model_id);
-      CREATE INDEX IF NOT EXISTS idx_product_category_category_id ON product_category(category_id);
-      CREATE INDEX IF NOT EXISTS idx_orders_customer              ON orders(customer_id);
-      CREATE INDEX IF NOT EXISTS idx_orders_shipping_address      ON orders(shipping_address_id);
-      CREATE INDEX IF NOT EXISTS idx_order_item_order             ON order_item(order_id);
-      CREATE INDEX IF NOT EXISTS idx_order_item_product           ON order_item(product_id);
-      CREATE INDEX IF NOT EXISTS idx_payment_order                ON payment(order_id);
-      CREATE INDEX IF NOT EXISTS idx_shipment_order               ON shipment(order_id);
-      CREATE INDEX IF NOT EXISTS idx_review_product               ON review(product_id);
-      CREATE INDEX IF NOT EXISTS idx_review_customer              ON review(customer_id);
-      CREATE INDEX IF NOT EXISTS idx_review_visitor               ON review(visitor_id);
-      CREATE INDEX IF NOT EXISTS idx_product_like_product         ON product_like(product_id);
-      CREATE INDEX IF NOT EXISTS idx_product_like_customer        ON product_like(customer_id);
-      CREATE INDEX IF NOT EXISTS idx_product_like_visitor         ON product_like(visitor_id);
-      CREATE INDEX IF NOT EXISTS idx_product_favorite_product     ON product_favorite(product_id);
-      CREATE INDEX IF NOT EXISTS idx_product_favorite_customer    ON product_favorite(customer_id);
-      CREATE INDEX IF NOT EXISTS idx_product_favorite_visitor     ON product_favorite(visitor_id);
-      CREATE INDEX IF NOT EXISTS idx_product_view_product         ON product_view(product_id);
-      CREATE INDEX IF NOT EXISTS idx_product_view_customer        ON product_view(customer_id);
-      CREATE INDEX IF NOT EXISTS idx_product_view_visitor         ON product_view(visitor_id);
-      CREATE INDEX IF NOT EXISTS idx_comment_product              ON comment(product_id);
-      CREATE INDEX IF NOT EXISTS idx_comment_parent               ON comment(parent_comment_id);
+      /* =========================
+         5) data patch: FillCategorySlugs (safe)
+      ========================== */
+      UPDATE category SET slug = CASE name
+        WHEN 'Мужчинам'        THEN 'men'
+        WHEN 'Женщинам'        THEN 'women'
+        WHEN 'Патриотам'       THEN 'patriots'
+        WHEN 'Гос.служащим'    THEN 'government'
+        WHEN 'Для бизнеса'     THEN 'business'
+        WHEN 'Премиум'         THEN 'premium'
+        WHEN 'Культурный код'  THEN 'cultural'
+        WHEN 'Имперский стиль' THEN 'imperial'
+        WHEN 'Православие'     THEN 'orthodoxy'
+        WHEN 'История'         THEN 'history'
+        WHEN 'СССР'            THEN 'ussr'
+        ELSE slug
+      END
+      WHERE kind = 'normal' AND (slug IS NULL OR slug = '');
 
-      /* search/sort in catalog */
-      CREATE INDEX IF NOT EXISTS idx_product_name_trgm    ON product USING GIN (name gin_trgm_ops);
-      CREATE INDEX IF NOT EXISTS idx_product_price        ON product(price);
-      CREATE INDEX IF NOT EXISTS idx_product_created_at   ON product(created_at);
-      CREATE INDEX IF NOT EXISTS idx_product_avg_rating   ON product(avg_rating);
-      CREATE INDEX IF NOT EXISTS idx_product_like_count   ON product(like_count);
-      CREATE INDEX IF NOT EXISTS idx_product_view_count   ON product(view_count);
-
-      /* filters */
-      CREATE INDEX IF NOT EXISTS idx_product_material     ON product(material);
-      CREATE INDEX IF NOT EXISTS idx_product_popularity   ON product(popularity);
-      CREATE INDEX IF NOT EXISTS idx_product_collection   ON product(collection);
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'idx_category_slug'
+        ) THEN
+          CREATE INDEX idx_category_slug ON category (slug);
+        END IF;
+      END$$;
     `);
   }
 
   public async down(q: QueryRunner): Promise<void> {
     await q.query(`
-      /* ---------- views ---------- */
+      /* view */
       DROP VIEW IF EXISTS v_product_full;
 
-      /* ---------- triggers (drop before functions) ---------- */
+      /* triggers first */
       DROP TRIGGER IF EXISTS trg_product_touch ON product;
       DROP TRIGGER IF EXISTS trg_company_reviews_touch ON company_reviews;
       DROP TRIGGER IF EXISTS trg_review_change ON review;
@@ -575,7 +595,7 @@ export class SquashedAccountCatalogFinal1710000013000
       DROP TRIGGER IF EXISTS trg_order_item_recalc_delete ON order_item;
       DROP TRIGGER IF EXISTS trg_orders_touch ON orders;
 
-      /* ---------- functions ---------- */
+      /* functions */
       DROP FUNCTION IF EXISTS touch_updated_at;
       DROP FUNCTION IF EXISTS update_product_avg_rating;
       DROP FUNCTION IF EXISTS adjust_like_count;
@@ -586,12 +606,16 @@ export class SquashedAccountCatalogFinal1710000013000
       DROP FUNCTION IF EXISTS recalc_order_total;
       DROP FUNCTION IF EXISTS orders_touch_updated_at;
 
-      /* ---------- explicit indexes ---------- */
-      DROP INDEX IF EXISTS ux_product_view_daily_guard;
+      /* explicit unique/indexes */
+      DROP INDEX IF EXISTS uq_product_view_daily;
+      DROP INDEX IF EXISTS uq_review_product_visitor;
+      DROP INDEX IF EXISTS uq_review_product_customer;
+
+      DROP INDEX IF EXISTS idx_category_slug;
       DROP INDEX IF EXISTS ux_category_slug_lower;
       DROP INDEX IF EXISTS idx_category_parent;
       DROP INDEX IF EXISTS idx_category_kind;
-      DROP INDEX IF NOT EXISTS idx_category_name_kind;
+      DROP INDEX IF EXISTS idx_category_name_kind;
 
       DROP INDEX IF EXISTS idx_company_reviews_customer;
       DROP INDEX IF EXISTS idx_company_reviews_is_approved;
@@ -641,15 +665,8 @@ export class SquashedAccountCatalogFinal1710000013000
       DROP INDEX IF EXISTS idx_product_collection;
 
       DROP INDEX IF EXISTS idx_guest_session_last_seen;
-      DROP INDEX IF EXISTS uq_cart_customer;
-      DROP INDEX IF EXISTS uq_cart_guest;
 
-      DROP INDEX IF EXISTS ux_product_like_user;
-      DROP INDEX IF EXISTS ux_product_like_visitor;
-      DROP INDEX IF EXISTS ux_product_favorite_user;
-      DROP INDEX IF EXISTS ux_product_favorite_visitor;
-
-      /* ---------- tables (children first) ---------- */
+      /* tables (children first) */
       DROP TABLE IF EXISTS cart_item;
       DROP TABLE IF EXISTS cart;
       DROP TABLE IF EXISTS guest_session;
@@ -669,7 +686,7 @@ export class SquashedAccountCatalogFinal1710000013000
       DROP TABLE IF EXISTS address;
       DROP TABLE IF EXISTS product_category;
       DROP TABLE IF EXISTS product_image;
-      /* drop product checks */
+
       ALTER TABLE IF EXISTS product DROP CONSTRAINT IF EXISTS product_material_ck;
       ALTER TABLE IF EXISTS product DROP CONSTRAINT IF EXISTS product_popularity_ck;
       ALTER TABLE IF EXISTS product DROP CONSTRAINT IF EXISTS product_collection_ck;
