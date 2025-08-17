@@ -1,133 +1,274 @@
-import {
-  Injectable,
-  BadRequestException,
-  InternalServerErrorException,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import axios, { AxiosError, AxiosResponse } from 'axios';
+import { Injectable, Logger } from '@nestjs/common';
+import { HttpService } from '@nestjs/axios';
+import { lastValueFrom } from 'rxjs';
+import { isAxiosError, type AxiosError } from 'axios';
+import type { Response } from 'express';
+import { ChatDto } from './dto/chat.dto';
+import { YcIamManager } from './iam.manager';
 
-/* ===== Типы ===== */
+/* =========================
+ * Типы YC Completion API
+ * ========================= */
+
 type Role = 'system' | 'user' | 'assistant';
+
 interface YCMessage {
   role: Role;
   text: string;
 }
+interface YCCompletionOptions {
+  stream: boolean;
+  temperature: number;
+  maxTokens: number;
+}
+interface YCRequestBody {
+  modelUri: string;
+  completionOptions: YCCompletionOptions;
+  messages: YCMessage[];
+}
+
+interface YCUsage {
+  inputTextTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+}
+
 interface YCAlternative {
-  message: YCMessage;
+  message?: { role?: Role; text?: string };
 }
 interface YCResult {
   alternatives?: YCAlternative[];
+  usage?: YCUsage;
 }
-interface YCCompletionResponse {
+interface YCResponse {
+  result?: YCResult;
+}
+interface YCStreamChunk {
   result?: YCResult;
 }
 
-/* ===== Хелперы ===== */
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null;
-}
-function isYCCompletionResponse(x: unknown): x is YCCompletionResponse {
-  if (!isRecord(x)) return false;
-  const r = x['result'];
-  if (r === undefined) return true;
-  if (!isRecord(r)) return false;
-  const alts = r['alternatives'];
-  return alts === undefined || Array.isArray(alts);
-}
-function isAxiosErr(e: unknown): e is AxiosError {
-  return typeof e === 'object' && e !== null && 'isAxiosError' in (e as any);
+/* =========================
+ * Утилиты окружения
+ * ========================= */
+
+function envStr(name: string, fallback = ''): string {
+  const v = process.env[name];
+  return (v ?? fallback).toString().trim();
 }
 
-/* ===== Константы ===== */
-const LLM_BASE_URL = 'https://llm.api.cloud.yandex.net/foundationModels/v1';
-const SYSTEM_PROMPT = [
-  'Ты — вежливый ассистент интернет-магазина "Orlov".',
-  'Помогаешь выбрать чехол, уточняешь модель телефона, материалы и коллекции,',
-  'рассказываешь про доставку/оплату/возврат. Если вопрос не про магазин —',
-  'мягко возвращай разговор к ассортименту.',
-].join(' ');
+function envNum(name: string, fallback: number): number {
+  const v = process.env[name];
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/* =========================
+ * Type guards / helpers
+ * ========================= */
+
+function isRecord(val: unknown): val is Record<string, unknown> {
+  return typeof val === 'object' && val !== null;
+}
+function hasOwn(obj: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
 
 @Injectable()
 export class YandexService {
-  private readonly folderId: string;
-  private readonly apiKey: string;
-  private readonly model: string;
-  private readonly timeoutMs: number;
+  private readonly logger = new Logger(YandexService.name);
+  private readonly endpoint =
+    'https://llm.api.cloud.yandex.net/foundationModels/v1/completion';
 
-  constructor(cfg: ConfigService) {
-    this.folderId = cfg.get<string>('YANDEXGPT_FOLDER_ID', '');
-    this.apiKey = cfg.get<string>('YANDEXGPT_API_KEY', '');
-    this.model = cfg.get<string>('YANDEXGPT_MODEL', 'yandexgpt-lite');
-    this.timeoutMs = parseInt(
-      cfg.get<string>('YANDEXGPT_TIMEOUT_MS', '15000'),
-      10,
-    );
+  // допускаем три варианта авторизации
+  private readonly apiKey = envStr('YANDEXGPT_API_KEY');
+  private readonly envIam = envStr('YC_IAM_TOKEN');
+  private readonly authKeyPath = envStr('YC_AUTHORIZED_KEY_PATH');
 
-    if (!this.folderId) throw new Error('YANDEXGPT_FOLDER_ID не задан в .env');
-    if (!this.apiKey) throw new Error('YANDEXGPT_API_KEY не задан в .env');
+  private readonly folderId = envStr('YANDEXGPT_FOLDER_ID');
+  private readonly modelUri =
+    envStr('YANDEX_MODEL_URI') || `gpt://${this.folderId}/yandexgpt-lite`;
+  private readonly defaultTemp = envNum('YANDEX_TEMPERATURE', 0.2);
+  private readonly defaultMaxTokens = envNum('YANDEX_MAX_TOKENS', 800);
+
+  private iamManager?: YcIamManager;
+
+  constructor(private readonly http: HttpService) {
+    if (!this.folderId) {
+      throw new Error('YANDEXGPT_FOLDER_ID не задан в окружении');
+    }
+    if (!this.apiKey && !this.envIam && !this.authKeyPath) {
+      throw new Error(
+        'Нужен либо YANDEXGPT_API_KEY, либо YC_IAM_TOKEN, либо YC_AUTHORIZED_KEY_PATH',
+      );
+    }
+    if (this.authKeyPath) {
+      this.iamManager = new YcIamManager(this.http, this.authKeyPath);
+    }
   }
 
-  /** Один запрос к YandexGPT */
-  async complete(userMessage: string): Promise<string> {
-    // основной вариант URI
-    const modelUri = `gpt://${this.folderId}/${this.model}/latest`;
+  // теперь заголовки асинхронные (если надо получить/обновить IAM-токен)
+  private async headers(): Promise<Record<string, string>> {
+    if (this.envIam) {
+      return {
+        Authorization: `Bearer ${this.envIam}`,
+        'x-folder-id': this.folderId,
+        'Content-Type': 'application/json',
+      };
+    }
+    if (this.iamManager) {
+      const iam = await this.iamManager.getToken();
+      return {
+        Authorization: `Bearer ${iam}`,
+        'x-folder-id': this.folderId,
+        'Content-Type': 'application/json',
+      };
+    }
+    // fallback: Api-Key
+    return {
+      Authorization: `Api-Key ${this.apiKey}`,
+      'x-folder-id': this.folderId,
+      'Content-Type': 'application/json',
+    };
+  }
 
-    const payload = {
-      modelUri,
-      completionOptions: { stream: false, temperature: 0.6, maxTokens: 700 },
-      messages: [
-        { role: 'system', text: SYSTEM_PROMPT },
-        { role: 'user', text: userMessage },
-      ] as YCMessage[],
+  private withSystem(dto: ChatDto): YCMessage[] {
+    const sys =
+      dto.systemPrompt ??
+      'Ты консультант интернет-магазина ORLOV. Говори кратко и по делу, дружелюбно. Если не уверен в наличии/ценах — скажи, что нужно уточнить. Помогай подобрать чехол по модели телефона, материалу и бюджету. Русский язык.';
+    return [{ role: 'system', text: sys }, ...dto.messages] as YCMessage[];
+  }
+
+  /* =========================
+   * Нестримающий ответ
+   * ========================= */
+  async complete(dto: ChatDto): Promise<{
+    modelUri: string;
+    role: 'assistant';
+    text: string;
+    usage: YCUsage | null;
+  }> {
+    const body: YCRequestBody = {
+      modelUri: this.modelUri,
+      completionOptions: {
+        stream: false,
+        temperature: dto.temperature ?? this.defaultTemp,
+        maxTokens: dto.maxTokens ?? this.defaultMaxTokens,
+      },
+      messages: this.withSystem(dto),
     };
 
     try {
-      const res: AxiosResponse<YCCompletionResponse> = await axios.post(
-        `${LLM_BASE_URL}/completion`,
-        payload,
-        {
-          timeout: this.timeoutMs,
-          headers: {
-            Authorization: `Api-Key ${this.apiKey}`,
-            'Content-Type': 'application/json',
-            'x-folder-id': this.folderId, // иногда требуется явно
-          },
-        },
+      const resp = await lastValueFrom(
+        this.http.post<YCResponse>(this.endpoint, body, {
+          headers: await this.headers(),
+        }),
+      );
+      const data = resp.data;
+
+      const alt = data?.result?.alternatives?.[0];
+      const text = alt?.message?.text ?? '';
+      const usage = data?.result?.usage ?? null;
+
+      return { modelUri: this.modelUri, role: 'assistant', text, usage };
+    } catch (err: unknown) {
+      this.logger.error(this.stringifyAxiosError(err));
+      if (isAxiosError(err) && err.response?.status === 403) {
+        throw new Error(
+          '403 Forbidden от Yandex API: проверь ключ/токен, права на папку (folderId) и что modelUri указывает на тот же folderId.',
+        );
+      }
+      throw err;
+    }
+  }
+
+  /* =========================
+   * Стриминг (SSE)
+   * ========================= */
+  async streamComplete(dto: ChatDto, res: Response): Promise<void> {
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+
+    const body: YCRequestBody = {
+      modelUri: this.modelUri,
+      completionOptions: {
+        stream: true,
+        temperature: dto.temperature ?? this.defaultTemp,
+        maxTokens: dto.maxTokens ?? this.defaultMaxTokens,
+      },
+      messages: this.withSystem(dto),
+    };
+
+    try {
+      const axiosResp = await lastValueFrom(
+        this.http.post(this.endpoint, body, {
+          headers: await this.headers(),
+          responseType: 'stream' as const,
+        }),
       );
 
-      const data = res.data;
-      if (!isYCCompletionResponse(data)) {
-        throw new InternalServerErrorException(
-          'Неверный формат ответа от YandexGPT',
-        );
-      }
+      const readable = axiosResp.data as NodeJS.ReadableStream;
 
-      const text = data.result?.alternatives?.[0]?.message?.text;
-      if (!text)
-        throw new InternalServerErrorException('Пустой ответ от YandexGPT');
+      let buffer = '';
+      readable.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString('utf8');
 
-      return text;
-    } catch (e) {
-      if (isAxiosErr(e)) {
-        // временный подробный лог для диагностики
+        let nl = buffer.indexOf('\n');
+        while (nl !== -1) {
+          const line = buffer.slice(0, nl).trim();
+          buffer = buffer.slice(nl + 1);
+          nl = buffer.indexOf('\n');
 
-        console.error(
-          'YC error:',
-          e.response?.status,
-          JSON.stringify(e.response?.data),
-        );
+          if (!line) continue;
 
-        const status = e.response?.status;
-        const body = e.response?.data;
-        let msg = 'YandexGPT request failed';
-        if (isRecord(body) && typeof body.message === 'string')
-          msg = body.message;
+          try {
+            const obj: unknown = JSON.parse(line);
+            if (this.isYCStreamChunk(obj)) {
+              const part = obj.result?.alternatives?.[0]?.message?.text;
+              if (typeof part === 'string' && part.length > 0) {
+                res.write(`data: ${JSON.stringify(part)}\n\n`);
+              }
+            }
+          } catch {
+            // обрыв JSON — ждём следующий чанк
+          }
+        }
+      });
 
-        if (status && status >= 400 && status < 500)
-          throw new BadRequestException(msg);
-        throw new InternalServerErrorException(msg);
-      }
-      throw new InternalServerErrorException('YandexGPT request failed');
+      readable.on('end', () => {
+        res.write('event: end\ndata: [DONE]\n\n');
+        res.end();
+      });
+
+      readable.on('error', (e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.logger.error(msg);
+        res.write(`event: error\ndata: ${JSON.stringify(msg)}\n\n`);
+        res.end();
+      });
+    } catch (err: unknown) {
+      this.logger.error(this.stringifyAxiosError(err));
+      res.status(500).json({
+        error: 'Yandex streaming request failed',
+        details: this.stringifyAxiosError(err),
+      });
     }
+  }
+
+  /* =========================
+   * Вспомогательные
+   * ========================= */
+  private stringifyAxiosError(err: unknown): string {
+    if (isAxiosError(err)) {
+      const ax = err as AxiosError<unknown, unknown>;
+      const status = ax.response?.status;
+      const data: unknown = ax.response?.data;
+      return `AxiosError(${status}): ${ax.message} ${data ? JSON.stringify(data) : ''}`.trim();
+    }
+    return err instanceof Error ? err.message : String(err);
+  }
+
+  private isYCStreamChunk(val: unknown): val is YCStreamChunk {
+    return isRecord(val) && hasOwn(val, 'result');
   }
 }

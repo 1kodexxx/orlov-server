@@ -1,14 +1,10 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
 import { HttpModule } from '@nestjs/axios';
-import { YandexController } from './yandex.controller';
 import { YandexService } from './yandex.service';
+import { YandexController } from './yandex.controller';
 
 @Module({
-  imports: [
-    ConfigModule, // доступ к .env
-    HttpModule, // не обязателен, но можно оставить
-  ],
+  imports: [HttpModule],
   controllers: [YandexController],
   providers: [YandexService],
   exports: [YandexService],
