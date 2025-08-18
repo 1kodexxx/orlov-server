@@ -11,12 +11,10 @@ import { CatalogModule } from './catalog/catalog.module';
 import { FavoritesModule } from './favorites/favorites.module';
 import { CompanyReviewsModule } from './company-reviews/company-reviews.module';
 import { VisitorIdMiddleware } from './common/visitor/visitor-id.middleware';
-
 import { OrdersModule } from './orders/orders.module';
 
 @Module({
   imports: [
-    // .env доступен всем ниже
     ConfigModule.forRoot({
       isGlobal: true,
       expandVariables: true,
@@ -29,7 +27,6 @@ import { OrdersModule } from './orders/orders.module';
     AuthModule,
     CompanyReviewsModule,
     YandexModule,
-
     OrdersModule,
 
     TypeOrmModule.forRootAsync({

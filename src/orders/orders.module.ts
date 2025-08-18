@@ -13,8 +13,6 @@ import { CartItem } from './entities/cart-item.entity';
 import { Product } from './entities/product.entity';
 import { Customer } from './entities/customer.entity';
 
-import { UsersModule } from '../users/users.module';
-
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -26,7 +24,6 @@ import { UsersModule } from '../users/users.module';
       Customer,
     ]),
     HttpModule,
-    UsersModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService, TelegramService],

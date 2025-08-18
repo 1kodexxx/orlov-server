@@ -1,24 +1,26 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-import type { Request } from 'express';
 
 export interface AuthUser {
   id: number;
-  email?: string;
-  role?: string;
+  email: string;
+  role: 'admin' | 'manager' | 'customer';
+  firstName?: string | null;
+  lastName?: string | null;
+  avatarUrl?: string | null;
 }
 
-/** Полный объект пользователя */
+/** Возвращает весь объект user (payload), который положил Guard/Passport */
 export const CurrentUser = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): AuthUser => {
-    const req = ctx.switchToHttp().getRequest<Request & { user: AuthUser }>();
+  (_data: unknown, ctx: ExecutionContext): AuthUser | undefined => {
+    const req = ctx.switchToHttp().getRequest<{ user?: AuthUser }>();
     return req.user;
   },
 );
 
-/** Только id пользователя (number) */
+/** Только id пользователя */
 export const CurrentUserId = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): number => {
-    const req = ctx.switchToHttp().getRequest<Request & { user: AuthUser }>();
-    return Number(req.user.id);
+  (_data: unknown, ctx: ExecutionContext): number | undefined => {
+    const req = ctx.switchToHttp().getRequest<{ user?: AuthUser }>();
+    return req.user?.id;
   },
 );

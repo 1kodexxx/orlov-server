@@ -1,17 +1,39 @@
-import { BadRequestException } from '@nestjs/common';
-import { ForbiddenException } from '@nestjs/common';
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, FindOptionsOrderValue } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
-import { TelegramService } from './telegram.service';
-
-import { Customer } from './entities/customer.entity';
-import { Product } from './entities/product.entity';
 import { Cart } from './entities/cart.entity';
 import { CartItem } from './entities/cart-item.entity';
+import { Product } from './entities/product.entity';
+import { Customer } from './entities/customer.entity';
+import { TelegramService } from './telegram.service';
+
+export type CreatedOrder = {
+  orderId: number;
+  status: string;
+  totalAmount: string;
+  currency: 'RUB';
+  items: Array<{
+    productId: number;
+    name: string;
+    quantity: number;
+    unitPrice: string;
+    lineTotal: string;
+  }>;
+  customer: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    avatarUrl: string | null;
+  };
+  createdAt: Date;
+};
 
 @Injectable()
 export class OrdersService {
@@ -30,20 +52,44 @@ export class OrdersService {
     private readonly tg: TelegramService,
   ) {}
 
-  /**
-   * Создать заказ из корзины авторизованного пользователя.
-   * Статус: 'in_transit' (разрешён CHECK).
-   * total_amount пересчитает триггер recalc_order_total().
-   */
-  async checkout(currentUser: { id: number }) {
+  private esc(s: string): string {
+    return (s ?? '').replace(
+      /[<&>]/g,
+      (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[ch]!,
+    );
+  }
+
+  private toAbsoluteUrl(
+    maybeRelative: string | null | undefined,
+  ): string | null {
+    if (!maybeRelative) return null;
+    if (/^https?:\/\//i.test(maybeRelative)) return maybeRelative;
+    const base = process.env.PUBLIC_BASE_URL?.replace(/\/+$/, '') ?? '';
+    if (!base) return null;
+    const tail = String(maybeRelative).replace(/^\/+/, '');
+    return `${base}/${tail}`;
+  }
+
+  /** Безопасно достаем аватар, даже если поля нет в типе Customer */
+  private pickAvatarUrl(c: Customer): string | null {
+    const v = (c as unknown as { avatarUrl?: unknown }).avatarUrl;
+    return typeof v === 'string' ? v : null;
+  }
+
+  private initialsAvatar(first: string, last: string): string {
+    const name = `${first || ''} ${last || ''}`.trim() || 'User';
+    const enc = encodeURIComponent(name);
+    return `https://ui-avatars.com/api/?name=${enc}&background=2b2b2b&color=EFE393&size=512&bold=true`;
+  }
+
+  async checkout(currentUser: { id: number }): Promise<CreatedOrder> {
     if (!currentUser?.id) {
       throw new ForbiddenException('Требуется авторизация');
     }
 
-    // Последняя корзина пользователя
     const cart = await this.cartsRepo.findOne({
       where: { customerId: currentUser.id },
-      order: { id: 'DESC' as FindOptionsOrderValue },
+      order: { id: 'DESC' as const },
     });
     if (!cart) throw new BadRequestException('Корзина пуста');
 
@@ -53,16 +99,14 @@ export class OrdersService {
     });
     if (items.length === 0) throw new BadRequestException('Корзина пуста');
 
-    const customer = await this.customersRepo.findOneByOrFail({
-      id: currentUser.id,
-    });
+    await this.customersRepo.findOneByOrFail({ id: currentUser.id }); // проверка существования
 
     const order = await this.ds.transaction(async (trx) => {
       const created = await trx.getRepository(Order).save({
-        customerId: customer.id,
+        customerId: currentUser.id,
         orderDate: new Date(),
         status: 'in_transit',
-        totalAmount: '0.00', // пересчитается триггером
+        totalAmount: '0.00',
       });
 
       const orderItems = items.map((ci) =>
@@ -74,24 +118,20 @@ export class OrdersService {
         }),
       );
       await trx.getRepository(OrderItem).save(orderItems);
-
-      // очистка корзины
       await trx.getRepository(CartItem).delete({ cartId: cart.id });
 
-      // вернуть заказ с составом и покупателем
       return trx.getRepository(Order).findOneOrFail({
         where: { id: created.id },
         relations: { items: { product: true }, customer: true },
       });
     });
 
-    await this.tg.send(this.buildTelegramHtml(order));
-
-    return {
+    const dto: CreatedOrder = {
       orderId: order.id,
       status: order.status,
       totalAmount: order.totalAmount,
       currency: 'RUB',
+      createdAt: order.orderDate,
       items: order.items.map((i) => ({
         productId: i.productId,
         name: i.product?.name ?? '',
@@ -100,40 +140,48 @@ export class OrdersService {
         lineTotal: i.lineTotal,
       })),
       customer: {
-        firstName: order.customer.firstName,
-        lastName: order.customer.lastName,
-        email: order.customer.email,
+        firstName: order.customer.firstName ?? '',
+        lastName: order.customer.lastName ?? '',
+        email: order.customer.email ?? '',
+        // ✅ берём аватар безопасно и делаем его абсолютным
+        avatarUrl: this.toAbsoluteUrl(this.pickAvatarUrl(order.customer)),
       },
-      createdAt: order.orderDate,
     };
+
+    await this.sendOrderToTelegram(dto);
+    return dto;
   }
 
-  private buildTelegramHtml(order: Order): string {
-    // Без индексирования по объекту — чтобы TS не придирался
-    const esc = (s: string) =>
-      (s ?? '').replace(/[<&>]/g, (ch) =>
-        ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : '&amp;',
-      );
+  private async sendOrderToTelegram(order: CreatedOrder): Promise<void> {
+    const nameLine = [order.customer.firstName, order.customer.lastName]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
 
-    const lines = order.items
-      .map(
-        (i) =>
-          `• <b>${esc(i.product?.name ?? 'Товар')}</b> × ${i.quantity} = <b>${i.lineTotal} ₽</b>`,
-      )
-      .join('\n');
+    const fullName = this.esc(nameLine || '—');
+    const email = this.esc(order.customer.email || '—');
 
-    return [
-      `<b>Новый заказ №${order.id}</b>`,
+    const lines = order.items.map((i) => {
+      const n = this.esc(i.name);
+      return `• ${n} × <b>${i.quantity}</b> = <b>${i.lineTotal} ₽</b>`;
+    });
+
+    const caption = [
+      `👤 <b>${fullName}</b>`,
+      `✉️ <u>${email}</u>`,
       '',
-      `<b>Клиент:</b> ${esc(order.customer.firstName)} ${esc(order.customer.lastName)}`,
-      `<b>Email:</b> ${esc(order.customer.email)}`,
-      '',
-      `<b>Состав:</b>`,
-      lines,
-      '',
-      `<b>Итого:</b> ${order.totalAmount} ₽`,
-      `<i>Статус:</i> ${order.status}`,
-      `<i>Дата:</i> ${order.orderDate.toISOString()}`,
+      `🛒 <b>Заказ №${order.orderId}</b>`,
+      '────────────────────',
+      ...lines,
+      '────────────────────',
+      `💳 <b>К оплате:</b> <b>${order.totalAmount} ₽</b>`,
+      `🏷 <i>${order.status}</i> · 🗓 ${order.createdAt.toISOString()}`,
     ].join('\n');
+
+    const photo =
+      order.customer.avatarUrl ??
+      this.initialsAvatar(order.customer.firstName, order.customer.lastName);
+
+    await this.tg.sendPhoto(photo, caption);
   }
 }

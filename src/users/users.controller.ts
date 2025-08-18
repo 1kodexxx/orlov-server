@@ -13,12 +13,15 @@ import {
   UseInterceptors,
   UploadedFile,
   NotFoundException,
+  Res,
+  Query,
 } from '@nestjs/common';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import sharp from 'sharp';
 
 import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -164,5 +167,43 @@ export class UsersController {
       throw new ForbiddenException('Admin role required');
     await this.users.deleteById(id);
     return { success: true };
+  }
+
+  /**
+   * ПУБЛИЧНЫЙ плейсхолдер аватарки (PNG) — без авторизации.
+   * URL: /users/avatar/placeholder/:id.png?name=Имя%20Фамилия
+   */
+  @UseGuards() // переопределяем guard на уровне метода -> публично
+  @Get('avatar/placeholder/:id.png')
+  async avatarPlaceholder(
+    @Param('id') _id: string,
+    @Query('name') name: string,
+    @Res() res: Response,
+  ) {
+    const initials = (name || 'User')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((s) => s[0]?.toUpperCase())
+      .join('');
+
+    const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#2b2b2b"/>
+          <stop offset="1" stop-color="#1a1a1a"/>
+        </linearGradient>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#g)"/>
+      <circle cx="256" cy="256" r="220" fill="#111" opacity="0.65"/>
+      <text x="50%" y="52%" font-size="180" font-family="Inter, system-ui, Arial"
+            text-anchor="middle" dominant-baseline="middle" fill="#EFE393">${initials}</text>
+    </svg>`;
+
+    const png = await sharp(Buffer.from(svg)).png().toBuffer();
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=3600, immutable');
+    return res.send(png);
   }
 }
