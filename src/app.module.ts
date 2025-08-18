@@ -12,9 +12,11 @@ import { FavoritesModule } from './favorites/favorites.module';
 import { CompanyReviewsModule } from './company-reviews/company-reviews.module';
 import { VisitorIdMiddleware } from './common/visitor/visitor-id.middleware';
 
+import { OrdersModule } from './orders/orders.module';
+
 @Module({
   imports: [
-    // ✅ .env доступен всем ниже
+    // .env доступен всем ниже
     ConfigModule.forRoot({
       isGlobal: true,
       expandVariables: true,
@@ -27,6 +29,8 @@ import { VisitorIdMiddleware } from './common/visitor/visitor-id.middleware';
     AuthModule,
     CompanyReviewsModule,
     YandexModule,
+
+    OrdersModule,
 
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
