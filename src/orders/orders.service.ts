@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -13,6 +14,7 @@ import { CartItem } from './entities/cart-item.entity';
 import { Product } from './entities/product.entity';
 import { Customer } from './entities/customer.entity';
 import { TelegramService } from './telegram.service';
+import { ClientOrderNotifyDto } from './dto/client-notify.dto';
 
 export type CreatedOrder = {
   orderId: number;
@@ -30,13 +32,15 @@ export type CreatedOrder = {
     firstName: string;
     lastName: string;
     email: string;
-    avatarUrl: string | null;
+    avatarUrl: string | null; // абсолютный URL или null
   };
   createdAt: Date;
 };
 
 @Injectable()
 export class OrdersService {
+  private readonly log = new Logger(OrdersService.name);
+
   constructor(
     private readonly ds: DataSource,
     @InjectRepository(Order) private readonly ordersRepo: Repository<Order>,
@@ -52,6 +56,7 @@ export class OrdersService {
     private readonly tg: TelegramService,
   ) {}
 
+  /** экранирование для подписи в TG */
   private esc(s: string): string {
     return (s ?? '').replace(
       /[<&>]/g,
@@ -59,29 +64,33 @@ export class OrdersService {
     );
   }
 
-  private toAbsoluteUrl(
-    maybeRelative: string | null | undefined,
-  ): string | null {
-    if (!maybeRelative) return null;
-    if (/^https?:\/\//i.test(maybeRelative)) return maybeRelative;
+  /** из относительного пути делает абсолютный (по PUBLIC_BASE_URL) */
+  private makeAbsolute(fileOrUrl?: string | null): string | null {
+    if (!fileOrUrl) return null;
+    if (/^https?:\/\//i.test(fileOrUrl)) return fileOrUrl;
     const base = process.env.PUBLIC_BASE_URL?.replace(/\/+$/, '') ?? '';
     if (!base) return null;
-    const tail = String(maybeRelative).replace(/^\/+/, '');
+    const tail = String(fileOrUrl).replace(/^\/+/, '');
     return `${base}/${tail}`;
   }
 
-  /** Безопасно достаем аватар, даже если поля нет в типе Customer */
-  private pickAvatarUrl(c: Customer): string | null {
-    const v = (c as unknown as { avatarUrl?: unknown }).avatarUrl;
-    return typeof v === 'string' ? v : null;
+  /** безопасно заберём avatarUrl даже если его нет в типе */
+  private pickAvatarRelative(user: Customer): string | null {
+    const v = (user as unknown as { avatarUrl?: unknown }).avatarUrl;
+    return typeof v === 'string' && v.trim() ? v : null;
   }
 
-  private initialsAvatar(first: string, last: string): string {
-    const name = `${first || ''} ${last || ''}`.trim() || 'User';
+  /** плейсхолдер с инициалами (когда нет файла) */
+  private initialsAvatar(first?: string | null, last?: string | null): string {
+    const name = `${first ?? ''} ${last ?? ''}`.trim() || 'User';
     const enc = encodeURIComponent(name);
+    // фирменные цвета: фон — #2b2b2b, текст — #EFE393
     return `https://ui-avatars.com/api/?name=${enc}&background=2b2b2b&color=EFE393&size=512&bold=true`;
   }
 
+  // -----------------------------
+  // Основное создание заказа (/checkout)
+  // -----------------------------
   async checkout(currentUser: { id: number }): Promise<CreatedOrder> {
     if (!currentUser?.id) {
       throw new ForbiddenException('Требуется авторизация');
@@ -99,7 +108,7 @@ export class OrdersService {
     });
     if (items.length === 0) throw new BadRequestException('Корзина пуста');
 
-    await this.customersRepo.findOneByOrFail({ id: currentUser.id }); // проверка существования
+    await this.customersRepo.findOneByOrFail({ id: currentUser.id });
 
     const order = await this.ds.transaction(async (trx) => {
       const created = await trx.getRepository(Order).save({
@@ -126,6 +135,9 @@ export class OrdersService {
       });
     });
 
+    const relative = this.pickAvatarRelative(order.customer);
+    const absolute = this.makeAbsolute(relative);
+
     const dto: CreatedOrder = {
       orderId: order.id,
       status: order.status,
@@ -143,22 +155,20 @@ export class OrdersService {
         firstName: order.customer.firstName ?? '',
         lastName: order.customer.lastName ?? '',
         email: order.customer.email ?? '',
-        // ✅ берём аватар безопасно и делаем его абсолютным
-        avatarUrl: this.toAbsoluteUrl(this.pickAvatarUrl(order.customer)),
+        avatarUrl: absolute,
       },
     };
 
-    await this.sendOrderToTelegram(dto);
+    await this.sendOrderToTelegramFromDb(dto);
     return dto;
   }
 
-  private async sendOrderToTelegram(order: CreatedOrder): Promise<void> {
-    const nameLine = [order.customer.firstName, order.customer.lastName]
-      .filter(Boolean)
-      .join(' ')
-      .trim();
-
-    const fullName = this.esc(nameLine || '—');
+  private async sendOrderToTelegramFromDb(order: CreatedOrder): Promise<void> {
+    const fullName = this.esc(
+      [order.customer.firstName, order.customer.lastName]
+        .filter(Boolean)
+        .join(' ') || '—',
+    );
     const email = this.esc(order.customer.email || '—');
 
     const lines = order.items.map((i) => {
@@ -170,18 +180,73 @@ export class OrdersService {
       `👤 <b>${fullName}</b>`,
       `✉️ <u>${email}</u>`,
       '',
-      `🛒 <b>Заказ №${order.orderId}</b>`,
+      `🛍 <b>Покупка</b>`,
       '────────────────────',
       ...lines,
       '────────────────────',
-      `💳 <b>К оплате:</b> <b>${order.totalAmount} ₽</b>`,
-      `🏷 <i>${order.status}</i> · 🗓 ${order.createdAt.toISOString()}`,
+      `💳 <b>Итого:</b> <b>${order.totalAmount} ₽</b>`,
+      `🗓 ${order.createdAt.toLocaleString('ru-RU')}`,
     ].join('\n');
 
     const photo =
       order.customer.avatarUrl ??
       this.initialsAvatar(order.customer.firstName, order.customer.lastName);
 
+    await this.tg.sendPhoto(photo, caption);
+  }
+
+  // -----------------------------
+  // NOTIFY из клиента (/checkout/notify)
+  // берём профиль (имя/фамилия/email/аватар) из БД,
+  // а сведения о позициях — из тела запроса (с colorName = слово).
+  // -----------------------------
+  async notifyFromClient(
+    userId: number,
+    dto: ClientOrderNotifyDto,
+  ): Promise<void> {
+    const user = await this.customersRepo.findOne({
+      where: { id: userId },
+    });
+    if (!user) throw new ForbiddenException('Пользователь не найден');
+
+    const avatarAbs = this.makeAbsolute(this.pickAvatarRelative(user));
+    const fullName = this.esc(
+      [user.firstName ?? '', user.lastName ?? ''].filter(Boolean).join(' ') ||
+        '—',
+    );
+    const email = this.esc(user.email ?? '—');
+
+    const lines = dto.items.map((i) => {
+      const name = this.esc(i.productName);
+      const model = i.phoneModel ? `, <i>${this.esc(i.phoneModel)}</i>` : '';
+      const color = i.colorName ? `, <b>${this.esc(i.colorName)}</b>` : ''; // ← слово «Красный»
+      const qty = i.quantity;
+      const sum = i.lineTotal.toLocaleString('ru-RU', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      return `• ${name}${model}${color}\n× ${qty} = <b>${sum} ₽</b>`;
+    });
+
+    const totalStr = dto.totalAmount.toLocaleString('ru-RU', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+    const caption = [
+      `👤 <b>${fullName}</b>`,
+      `✉️ <u>${email}</u>`,
+      '',
+      `🛍 <b>Покупка</b>`,
+      '────────────────────',
+      ...lines,
+      '────────────────────',
+      `💳 <b>Итого:</b> <b>${totalStr} ₽</b>`,
+      `🗓 ${new Date().toLocaleString('ru-RU')}`,
+    ].join('\n');
+
+    const photo =
+      avatarAbs ?? this.initialsAvatar(user.firstName, user.lastName);
     await this.tg.sendPhoto(photo, caption);
   }
 }
