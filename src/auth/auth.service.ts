@@ -1,8 +1,8 @@
-// src/auth/auth.service.ts
 import {
   BadRequestException,
   Injectable,
   UnauthorizedException,
+  ConflictException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
@@ -21,6 +21,20 @@ function parseTtlSeconds(v: string | undefined, fallback: number): number {
   const u = m[2] ?? 's';
   const mult = u === 's' ? 1 : u === 'm' ? 60 : u === 'h' ? 3600 : 86400;
   return n * mult;
+}
+
+/** Приводим любые варианты RU номера к виду +7XXXXXXXXXX */
+function normalizeRuPhone(input: string): string {
+  const digits = (input || '').replace(/\D+/g, '');
+  // варианты: 89XXXXXXXXX / 79XXXXXXXXX / 9XXXXXXXXX (не принимаем последний)
+  if (digits.length === 11 && digits[0] === '8') return `+7${digits.slice(1)}`;
+  if (digits.length === 11 && digits.startsWith('79')) return `+${digits}`;
+  if (digits.length === 12 && digits.startsWith('7')) return `+${digits}`;
+  if (digits.length === 12 && digits.startsWith('07'))
+    return `+${digits.slice(1)}`;
+  // если уже пришёл +7..........
+  if (input.startsWith('+7') && digits.length === 11) return `+${digits}`;
+  return `+7${digits.slice(-10)}`; // best-effort, дальше проверим корректность
 }
 
 @Injectable()
@@ -42,8 +56,22 @@ export class AuthService {
     refreshToken: string;
     user: JwtPayload;
   }> {
+    // email уникален
     const existed = await this.users.findByEmail(dto.email);
-    if (existed) throw new BadRequestException('Email already registered');
+    if (existed) throw new ConflictException('Email уже зарегистрирован');
+
+    // нормализуем и проверяем телефон
+    const phoneNorm = normalizeRuPhone(dto.phone);
+    if (!/^\+7\d{10}$/.test(phoneNorm)) {
+      throw new BadRequestException(
+        'Телефон должен быть российским номером (+7XXXXXXXXXX)',
+      );
+    }
+
+    const phoneOwner = await this.users.findByPhone(phoneNorm);
+    if (phoneOwner) {
+      throw new ConflictException('Этот номер телефона уже используется');
+    }
 
     const passwordHash = await argon2.hash(dto.password, {
       type: argon2.argon2id,
@@ -55,6 +83,7 @@ export class AuthService {
       role: 'customer',
       firstName: dto.firstName,
       lastName: dto.lastName,
+      phone: phoneNorm,
     });
 
     const pub: PublicUser = {
@@ -112,7 +141,7 @@ export class AuthService {
       algorithm: 'RS256',
       privateKey,
       expiresIn: process.env.JWT_ACCESS_TTL ?? '15m',
-      jwtid: jti, // <- этого достаточно: claim jti окажется в токене
+      jwtid: jti, // claim jti попадёт в токен
     });
 
     const refreshToken = await this.jwt.signAsync(base, {
@@ -121,7 +150,6 @@ export class AuthService {
       expiresIn: process.env.JWT_REFRESH_TTL ?? '7d',
     });
 
-    // Вернём payload с jti (удобно прокинуть дальше в контроллер)
     return { accessToken, refreshToken, payload: { ...base, jti } };
   }
 

@@ -38,6 +38,15 @@ async function safeUnlink(
   }
 }
 
+/** Нормализация RU-телефона: +7XXXXXXXXXX */
+function normalizeRuPhone(input: string): string {
+  const digits = (input || '').replace(/\D+/g, '');
+  if (digits.length === 11 && digits[0] === '8') return `+7${digits.slice(1)}`;
+  if (digits.length === 11 && digits.startsWith('79')) return `+${digits}`;
+  if (input.startsWith('+7') && digits.length === 11) return `+${digits}`;
+  return `+7${digits.slice(-10)}`;
+}
+
 /** Что можно обновлять в профиле */
 type ProfileUpdatable = DeepPartial<
   Pick<
@@ -101,6 +110,10 @@ export class UsersService {
     return this.repo.findOne({ where: { email } });
   }
 
+  async findByPhone(phone: string): Promise<User | null> {
+    return this.repo.findOne({ where: { phone } });
+  }
+
   async findByEmailWithPassword(email: string): Promise<User | null> {
     return this.repo.findOne({
       where: { email },
@@ -135,8 +148,9 @@ export class UsersService {
       firstName: data.firstName ?? null,
       lastName: data.lastName ?? null,
 
+      phone: data.phone ? normalizeRuPhone(data.phone) : null,
+
       avatarUrl: data.avatarUrl ?? null,
-      phone: data.phone ?? null,
       headline: data.headline ?? null,
       organization: data.organization ?? null,
       city: data.city ?? null,
@@ -182,12 +196,11 @@ export class UsersService {
   // Личный кабинет
   // -------------------------------------------------
 
-  /** Обновление анкеты в ЛК */
+  /** Обновление анкеты в ЛК (+ проверка уникальности телефона) */
   async updateProfile(userId: number, dto: UpdateProfileDto) {
     const data: ProfileUpdatable = {
       firstName: dto.firstName ?? null,
       lastName: dto.lastName ?? null,
-      phone: dto.phone ?? null,
       country: dto.country ?? null,
       city: dto.city ?? null,
       homeAddress: dto.homeAddress ?? null,
@@ -197,6 +210,24 @@ export class UsersService {
       birthDate: dto.birthDate ?? null,
       pickupPoint: dto.pickupPoint ?? null,
     };
+
+    if (typeof dto.phone !== 'undefined') {
+      if (dto.phone === null || dto.phone === '') {
+        data.phone = null;
+      } else {
+        const normalized = normalizeRuPhone(dto.phone);
+        if (!/^\+7\d{10}$/.test(normalized)) {
+          throw new ConflictException(
+            'Телефон должен быть российским номером (+7XXXXXXXXXX)',
+          );
+        }
+        const existed = await this.findByPhone(normalized);
+        if (existed && existed.id !== userId) {
+          throw new ConflictException('Этот номер телефона уже используется');
+        }
+        data.phone = normalized;
+      }
+    }
 
     type UpdateArg = Parameters<Repository<User>['update']>[1];
     await this.repo.update({ id: userId }, data as UpdateArg);

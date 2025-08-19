@@ -1,5 +1,4 @@
-// src/auth/dto/register.dto.ts
-import { IsEmail, MinLength, IsString, Length } from 'class-validator';
+import { IsEmail, MinLength, IsString, Length, Matches } from 'class-validator';
 
 export class RegisterDto {
   @IsEmail({}, { message: 'Некорректный email' })
@@ -15,4 +14,15 @@ export class RegisterDto {
   @IsString({ message: 'Фамилия должна быть строкой' })
   @Length(1, 100, { message: 'Фамилия должна быть от 1 до 100 символов' })
   lastName!: string;
+
+  /**
+   * Российский номер телефона.
+   * Разрешаем два «нормализованных» формата: +7XXXXXXXXXX или 8XXXXXXXXXX (ровно 11 цифр).
+   * Перед сохранением всё равно нормализуем в формат +7XXXXXXXXXX.
+   */
+  @Matches(/^(?:\+7|8)\d{10}$/, {
+    message:
+      'Телефон должен быть российским номером в формате +7XXXXXXXXXX или 8XXXXXXXXXX',
+  })
+  phone!: string;
 }

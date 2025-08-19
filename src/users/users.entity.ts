@@ -27,13 +27,15 @@ export class User {
   @Column({ name: 'token_version', type: 'int', default: 0 })
   tokenVersion!: number;
 
-  // === профиль (всё — nullable, т.к. пользователь может не заполнять)
+  // === профиль
   @Column({ name: 'first_name', type: 'varchar', length: 100, nullable: true })
   firstName!: string | null;
 
   @Column({ name: 'last_name', type: 'varchar', length: 100, nullable: true })
   lastName!: string | null;
 
+  // Телефон храним как строку в нормализованном виде +7XXXXXXXXXX.
+  // На уровне БД уникальности нет, но мы гарантируем её на уровне сервисов.
   @Column({ type: 'varchar', length: 20, nullable: true })
   phone!: string | null;
 
