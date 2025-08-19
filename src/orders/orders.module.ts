@@ -11,19 +11,15 @@ import { OrderItem } from './entities/order-item.entity';
 import { Cart } from './entities/cart.entity';
 import { CartItem } from './entities/cart-item.entity';
 import { Product } from './entities/product.entity';
-import { Customer } from './entities/customer.entity';
+
+// ➕ берём настоящий сервис пользователей
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      Order,
-      OrderItem,
-      Cart,
-      CartItem,
-      Product,
-      Customer,
-    ]),
+    TypeOrmModule.forFeature([Order, OrderItem, Cart, CartItem, Product]),
     HttpModule,
+    UsersModule, // ← тут
   ],
   controllers: [OrdersController],
   providers: [OrdersService, TelegramService],

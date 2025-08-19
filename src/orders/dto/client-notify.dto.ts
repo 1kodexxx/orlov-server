@@ -1,44 +1,38 @@
 import {
   IsArray,
-  IsInt,
-  IsNotEmpty,
   IsNumber,
   IsOptional,
+  IsPositive,
   IsString,
   Min,
 } from 'class-validator';
 
-export class ClientOrderItemDto {
+export class ClientNotifyItemDto {
   @IsString()
-  @IsNotEmpty()
-  productName!: string; // напр. "Чехол 'Имперский синий'"
+  productName!: string;
 
-  @IsString()
   @IsOptional()
-  phoneModel?: string; // напр. "iPhone 14 Pro"
-
   @IsString()
-  @IsOptional()
-  colorName?: string; // напр. "Красный"  ← используем слово
+  phoneModel?: string;
 
-  @IsInt()
-  @Min(1)
+  @IsOptional()
+  @IsString()
+  colorName?: string;
+
+  @IsNumber()
+  @IsPositive()
   quantity!: number;
 
   @IsNumber()
   @Min(0)
-  price!: number; // цена за единицу (для подписи)
-
-  @IsNumber()
-  @Min(0)
-  lineTotal!: number; // quantity * price
+  lineTotal!: number;
 }
 
 export class ClientOrderNotifyDto {
   @IsArray()
-  items!: ClientOrderItemDto[];
+  items!: ClientNotifyItemDto[];
 
   @IsNumber()
   @Min(0)
-  totalAmount!: number; // общая сумма
+  totalAmount!: number;
 }

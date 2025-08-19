@@ -11,7 +11,6 @@ export class TelegramService {
 
   constructor(private readonly http: HttpService) {}
 
-  /** простой текст */
   async send(text: string): Promise<void> {
     if (!this.token || !this.chatId) {
       this.log.warn('TG_BOT_TOKEN/TG_CHAT_ID не заданы — пропускаю отправку');
@@ -34,7 +33,6 @@ export class TelegramService {
     }
   }
 
-  /** фото по URL + подпись */
   async sendPhoto(photoUrl: string, caption: string): Promise<void> {
     if (!this.token || !this.chatId) {
       this.log.warn('TG_BOT_TOKEN/TG_CHAT_ID не заданы — пропускаю отправку');

@@ -1,3 +1,4 @@
+// src/orders/orders.service.ts
 import {
   BadRequestException,
   ForbiddenException,
@@ -12,9 +13,13 @@ import { OrderItem } from './entities/order-item.entity';
 import { Cart } from './entities/cart.entity';
 import { CartItem } from './entities/cart-item.entity';
 import { Product } from './entities/product.entity';
-import { Customer } from './entities/customer.entity';
+
 import { TelegramService } from './telegram.service';
 import { ClientOrderNotifyDto } from './dto/client-notify.dto';
+import { UsersService } from '../users/users.service';
+
+// тип-импорт, чтобы избегать any при установке relation
+import type { User } from '../users/users.entity';
 
 export type CreatedOrder = {
   orderId: number;
@@ -29,9 +34,10 @@ export type CreatedOrder = {
     lineTotal: string;
   }>;
   customer: {
-    firstName: string;
-    lastName: string;
+    firstName: string | null;
+    lastName: string | null;
     email: string;
+    phone: string | null;
     avatarUrl: string | null; // абсолютный URL или null
   };
   createdAt: Date;
@@ -51,9 +57,8 @@ export class OrdersService {
     private readonly cartItemsRepo: Repository<CartItem>,
     @InjectRepository(Product)
     private readonly productsRepo: Repository<Product>,
-    @InjectRepository(Customer)
-    private readonly customersRepo: Repository<Customer>,
     private readonly tg: TelegramService,
+    private readonly users: UsersService,
   ) {}
 
   /** экранирование для подписи в TG */
@@ -64,7 +69,7 @@ export class OrdersService {
     );
   }
 
-  /** из относительного пути делает абсолютный (по PUBLIC_BASE_URL) */
+  /** делает абсолютный URL по PUBLIC_BASE_URL, если пришёл относительный путь */
   private makeAbsolute(fileOrUrl?: string | null): string | null {
     if (!fileOrUrl) return null;
     if (/^https?:\/\//i.test(fileOrUrl)) return fileOrUrl;
@@ -74,27 +79,25 @@ export class OrdersService {
     return `${base}/${tail}`;
   }
 
-  /** безопасно заберём avatarUrl даже если его нет в типе */
-  private pickAvatarRelative(user: Customer): string | null {
-    const v = (user as unknown as { avatarUrl?: unknown }).avatarUrl;
-    return typeof v === 'string' && v.trim() ? v : null;
-  }
-
   /** плейсхолдер с инициалами (когда нет файла) */
-  private initialsAvatar(first?: string | null, last?: string | null): string {
+  private initialsAvatar(
+    userId: number,
+    first?: string | null,
+    last?: string | null,
+  ): string {
     const name = `${first ?? ''} ${last ?? ''}`.trim() || 'User';
     const enc = encodeURIComponent(name);
-    // фирменные цвета: фон — #2b2b2b, текст — #EFE393
-    return `https://ui-avatars.com/api/?name=${enc}&background=2b2b2b&color=EFE393&size=512&bold=true`;
+    const base = process.env.PUBLIC_BASE_URL?.replace(/\/+$/, '') ?? '';
+    return base
+      ? `${base}/users/avatar/placeholder/${userId}.png?name=${enc}`
+      : `https://ui-avatars.com/api/?name=${enc}&background=2b2b2b&color=EFE393&size=512&bold=true`;
   }
 
-  // -----------------------------
-  // Основное создание заказа (/checkout)
-  // -----------------------------
+  // --------------------------------------------------
+  // /checkout — корзина из БД
+  // --------------------------------------------------
   async checkout(currentUser: { id: number }): Promise<CreatedOrder> {
-    if (!currentUser?.id) {
-      throw new ForbiddenException('Требуется авторизация');
-    }
+    if (!currentUser?.id) throw new ForbiddenException('Требуется авторизация');
 
     const cart = await this.cartsRepo.findOne({
       where: { customerId: currentUser.id },
@@ -108,11 +111,15 @@ export class OrdersService {
     });
     if (items.length === 0) throw new BadRequestException('Корзина пуста');
 
-    await this.customersRepo.findOneByOrFail({ id: currentUser.id });
+    // профиль берём ТОЛЬКО через usersService (никакого legacy Customer)
+    const profile = await this.users.getPublicProfile(currentUser.id);
+    if (!profile) throw new ForbiddenException('Пользователь не найден');
 
+    // Создание заказа + перенос позиций корзины
     const order = await this.ds.transaction(async (trx) => {
+      // ✅ привязка relation: customer_id будет установлен корректно
       const created = await trx.getRepository(Order).save({
-        customerId: currentUser.id,
+        customer: { id: currentUser.id } as User,
         orderDate: new Date(),
         status: 'in_transit',
         totalAmount: '0.00',
@@ -135,9 +142,6 @@ export class OrdersService {
       });
     });
 
-    const relative = this.pickAvatarRelative(order.customer);
-    const absolute = this.makeAbsolute(relative);
-
     const dto: CreatedOrder = {
       orderId: order.id,
       status: order.status,
@@ -152,24 +156,27 @@ export class OrdersService {
         lineTotal: i.lineTotal,
       })),
       customer: {
-        firstName: order.customer.firstName ?? '',
-        lastName: order.customer.lastName ?? '',
-        email: order.customer.email ?? '',
-        avatarUrl: absolute,
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        email: profile.email,
+        phone: profile.phone,
+        avatarUrl: this.makeAbsolute(profile.avatarUrl),
       },
     };
 
-    await this.sendOrderToTelegramFromDb(dto);
+    await this.sendTg(dto);
     return dto;
   }
 
-  private async sendOrderToTelegramFromDb(order: CreatedOrder): Promise<void> {
+  /** Отправка в TG (общая разметка) */
+  private async sendTg(order: CreatedOrder): Promise<void> {
     const fullName = this.esc(
-      [order.customer.firstName, order.customer.lastName]
+      [order.customer.firstName ?? '', order.customer.lastName ?? '']
         .filter(Boolean)
         .join(' ') || '—',
     );
     const email = this.esc(order.customer.email || '—');
+    const phone = this.esc(order.customer.phone || '—');
 
     const lines = order.items.map((i) => {
       const n = this.esc(i.name);
@@ -179,8 +186,9 @@ export class OrdersService {
     const caption = [
       `👤 <b>${fullName}</b>`,
       `✉️ <u>${email}</u>`,
+      `📞 ${phone}`,
       '',
-      `🛍 <b>Покупка</b>`,
+      `🎁 <b>Покупка</b>`,
       '────────────────────',
       ...lines,
       '────────────────────',
@@ -190,36 +198,27 @@ export class OrdersService {
 
     const photo =
       order.customer.avatarUrl ??
-      this.initialsAvatar(order.customer.firstName, order.customer.lastName);
+      this.initialsAvatar(0, order.customer.firstName, order.customer.lastName);
 
     await this.tg.sendPhoto(photo, caption);
   }
 
-  // -----------------------------
-  // NOTIFY из клиента (/checkout/notify)
-  // берём профиль (имя/фамилия/email/аватар) из БД,
-  // а сведения о позициях — из тела запроса (с colorName = слово).
-  // -----------------------------
+  // --------------------------------------------------
+  // /checkout/front — позиции из клиента, профиль из БД
+  // --------------------------------------------------
   async notifyFromClient(
     userId: number,
     dto: ClientOrderNotifyDto,
-  ): Promise<void> {
-    const user = await this.customersRepo.findOne({
-      where: { id: userId },
-    });
-    if (!user) throw new ForbiddenException('Пользователь не найден');
+  ): Promise<{ ok: true; orderId: number }> {
+    // 1) Профиль — только из БД
+    const u = await this.users.getPublicProfile(userId);
+    if (!u) throw new ForbiddenException('Пользователь не найден');
 
-    const avatarAbs = this.makeAbsolute(this.pickAvatarRelative(user));
-    const fullName = this.esc(
-      [user.firstName ?? '', user.lastName ?? ''].filter(Boolean).join(' ') ||
-        '—',
-    );
-    const email = this.esc(user.email ?? '—');
-
+    // 2) Формируем текст для Telegram
     const lines = dto.items.map((i) => {
       const name = this.esc(i.productName);
       const model = i.phoneModel ? `, <i>${this.esc(i.phoneModel)}</i>` : '';
-      const color = i.colorName ? `, <b>${this.esc(i.colorName)}</b>` : ''; // ← слово «Красный»
+      const color = i.colorName ? `, <b>${this.esc(i.colorName)}</b>` : '';
       const qty = i.quantity;
       const sum = i.lineTotal.toLocaleString('ru-RU', {
         minimumFractionDigits: 2,
@@ -233,11 +232,18 @@ export class OrdersService {
       maximumFractionDigits: 2,
     });
 
+    const fullName = this.esc(
+      [u.firstName ?? '', u.lastName ?? ''].filter(Boolean).join(' ') || '—',
+    );
+    const email = this.esc(u.email || '—');
+    const phone = this.esc(u.phone || '—');
+
     const caption = [
       `👤 <b>${fullName}</b>`,
       `✉️ <u>${email}</u>`,
+      `📞 ${phone}`,
       '',
-      `🛍 <b>Покупка</b>`,
+      `🎁 <b>Покупка</b>`,
       '────────────────────',
       ...lines,
       '────────────────────',
@@ -245,8 +251,19 @@ export class OrdersService {
       `🗓 ${new Date().toLocaleString('ru-RU')}`,
     ].join('\n');
 
+    const avatarAbs = this.makeAbsolute(u.avatarUrl);
     const photo =
-      avatarAbs ?? this.initialsAvatar(user.firstName, user.lastName);
+      avatarAbs ?? this.initialsAvatar(userId, u.firstName, u.lastName);
     await this.tg.sendPhoto(photo, caption);
+
+    // 3) Сохраняем "виртуальный" заказ: ВАЖНО — relation на user
+    const created = await this.ds.getRepository(Order).save({
+      customer: { id: userId } as User, // ✅ customer_id заполнится, NOT NULL соблюдён
+      orderDate: new Date(),
+      status: 'in_transit',
+      totalAmount: String(dto.totalAmount.toFixed(2)),
+    });
+
+    return { ok: true, orderId: created.id };
   }
 }
