@@ -88,10 +88,16 @@ export class OrdersService {
       : `https://ui-avatars.com/api/?name=${enc}&background=2b2b2b&color=EFE393&size=512&bold=true`;
   }
 
-  /** Преобразовать hex цвета в человекочитаемое имя */
-  private colorHumanize(value?: string | null): string | null {
-    if (!value) return null;
-    const s = String(value).trim();
+  /** Преобразовать hex цвета → человекочитаемое имя; если уже слово — вернуть как есть */
+  private colorHumanize(val?: string | null): string | null {
+    if (!val) return null;
+    const raw = String(val).trim();
+    if (!raw) return null;
+
+    // Если это 6-символьный hex (с # или без)
+    const m = raw.match(/^#?([0-9a-fA-F]{6})$/);
+    const normalized = m ? `#${m[1].toLowerCase()}` : raw;
+
     const map: Record<string, string> = {
       '#facc15': 'Жёлтый',
       '#404040': 'Чёрный',
@@ -100,8 +106,8 @@ export class OrdersService {
       '#f87171': 'Красный',
       '#a855f7': 'Фиолетовый',
     };
-    const hex = s.toLowerCase();
-    return map[hex] ?? s; // если пришло уже слово — оставляем
+
+    return map[normalized.toLowerCase()] ?? raw; // если не hex или нет в карте — вернуть исходное (слово)
   }
 
   // -------------------- /checkout --------------------
@@ -229,8 +235,8 @@ export class OrdersService {
     const lines = dto.items.map((i) => {
       const name = this.esc(i.productName);
       const model = i.phoneModel ? `, <i>${this.esc(i.phoneModel)}</i>` : '';
-      const colorLabel = this.colorHumanize(i.colorName);
-      const color = colorLabel ? `, <b>${this.esc(colorLabel)}</b>` : '';
+      const colorName = this.colorHumanize(i.colorName); // ← нормализация цвета
+      const color = colorName ? `, <b>${this.esc(colorName)}</b>` : '';
       const qty = i.quantity;
       const sum = i.lineTotal.toLocaleString('ru-RU', {
         minimumFractionDigits: 2,
