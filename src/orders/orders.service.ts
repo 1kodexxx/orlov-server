@@ -1,4 +1,3 @@
-// src/orders/orders.service.ts
 import {
   BadRequestException,
   ForbiddenException,
@@ -18,7 +17,6 @@ import { TelegramService } from './telegram.service';
 import { ClientOrderNotifyDto } from './dto/client-notify.dto';
 import { UsersService } from '../users/users.service';
 
-// тип-импорт, чтобы избегать any при установке relation
 import type { User } from '../users/users.entity';
 
 export type CreatedOrder = {
@@ -38,7 +36,7 @@ export type CreatedOrder = {
     lastName: string | null;
     email: string;
     phone: string | null;
-    avatarUrl: string | null; // абсолютный URL или null
+    avatarUrl: string | null;
   };
   createdAt: Date;
 };
@@ -61,7 +59,6 @@ export class OrdersService {
     private readonly users: UsersService,
   ) {}
 
-  /** экранирование для подписи в TG */
   private esc(s: string): string {
     return (s ?? '').replace(
       /[<&>]/g,
@@ -69,7 +66,6 @@ export class OrdersService {
     );
   }
 
-  /** делает абсолютный URL по PUBLIC_BASE_URL, если пришёл относительный путь */
   private makeAbsolute(fileOrUrl?: string | null): string | null {
     if (!fileOrUrl) return null;
     if (/^https?:\/\//i.test(fileOrUrl)) return fileOrUrl;
@@ -79,7 +75,6 @@ export class OrdersService {
     return `${base}/${tail}`;
   }
 
-  /** плейсхолдер с инициалами (когда нет файла) */
   private initialsAvatar(
     userId: number,
     first?: string | null,
@@ -93,9 +88,23 @@ export class OrdersService {
       : `https://ui-avatars.com/api/?name=${enc}&background=2b2b2b&color=EFE393&size=512&bold=true`;
   }
 
-  // --------------------------------------------------
-  // /checkout — корзина из БД
-  // --------------------------------------------------
+  /** Преобразовать hex цвета в человекочитаемое имя */
+  private colorHumanize(value?: string | null): string | null {
+    if (!value) return null;
+    const s = String(value).trim();
+    const map: Record<string, string> = {
+      '#facc15': 'Жёлтый',
+      '#404040': 'Чёрный',
+      '#86efac': 'Зелёный',
+      '#3b82f6': 'Синий',
+      '#f87171': 'Красный',
+      '#a855f7': 'Фиолетовый',
+    };
+    const hex = s.toLowerCase();
+    return map[hex] ?? s; // если пришло уже слово — оставляем
+  }
+
+  // -------------------- /checkout --------------------
   async checkout(currentUser: { id: number }): Promise<CreatedOrder> {
     if (!currentUser?.id) throw new ForbiddenException('Требуется авторизация');
 
@@ -111,13 +120,10 @@ export class OrdersService {
     });
     if (items.length === 0) throw new BadRequestException('Корзина пуста');
 
-    // профиль берём ТОЛЬКО через usersService (никакого legacy Customer)
     const profile = await this.users.getPublicProfile(currentUser.id);
     if (!profile) throw new ForbiddenException('Пользователь не найден');
 
-    // Создание заказа + перенос позиций корзины
     const order = await this.ds.transaction(async (trx) => {
-      // ✅ привязка relation: customer_id будет установлен корректно
       const created = await trx.getRepository(Order).save({
         customer: { id: currentUser.id } as User,
         orderDate: new Date(),
@@ -168,7 +174,7 @@ export class OrdersService {
     return dto;
   }
 
-  /** Отправка в TG (общая разметка) */
+  /** Отправка заказа в TG */
   private async sendTg(order: CreatedOrder): Promise<void> {
     const fullName = this.esc(
       [order.customer.firstName ?? '', order.customer.lastName ?? '']
@@ -184,6 +190,8 @@ export class OrdersService {
     });
 
     const caption = [
+      `🧾 <b>Заказ №${order.orderId}</b>`,
+      '',
       `👤 <b>${fullName}</b>`,
       `✉️ <u>${email}</u>`,
       `📞 ${phone}`,
@@ -203,22 +211,26 @@ export class OrdersService {
     await this.tg.sendPhoto(photo, caption);
   }
 
-  // --------------------------------------------------
-  // /checkout/front — позиции из клиента, профиль из БД
-  // --------------------------------------------------
+  // -------------------- /checkout/front --------------------
   async notifyFromClient(
     userId: number,
     dto: ClientOrderNotifyDto,
   ): Promise<{ ok: true; orderId: number }> {
-    // 1) Профиль — только из БД
     const u = await this.users.getPublicProfile(userId);
     if (!u) throw new ForbiddenException('Пользователь не найден');
 
-    // 2) Формируем текст для Telegram
+    const created = await this.ds.getRepository(Order).save({
+      customer: { id: userId } as User,
+      orderDate: new Date(),
+      status: 'in_transit',
+      totalAmount: String(dto.totalAmount.toFixed(2)),
+    });
+
     const lines = dto.items.map((i) => {
       const name = this.esc(i.productName);
       const model = i.phoneModel ? `, <i>${this.esc(i.phoneModel)}</i>` : '';
-      const color = i.colorName ? `, <b>${this.esc(i.colorName)}</b>` : '';
+      const colorLabel = this.colorHumanize(i.colorName);
+      const color = colorLabel ? `, <b>${this.esc(colorLabel)}</b>` : '';
       const qty = i.quantity;
       const sum = i.lineTotal.toLocaleString('ru-RU', {
         minimumFractionDigits: 2,
@@ -239,6 +251,8 @@ export class OrdersService {
     const phone = this.esc(u.phone || '—');
 
     const caption = [
+      `🧾 <b>Заказ №${created.id}</b>`,
+      '',
       `👤 <b>${fullName}</b>`,
       `✉️ <u>${email}</u>`,
       `📞 ${phone}`,
@@ -256,14 +270,28 @@ export class OrdersService {
       avatarAbs ?? this.initialsAvatar(userId, u.firstName, u.lastName);
     await this.tg.sendPhoto(photo, caption);
 
-    // 3) Сохраняем "виртуальный" заказ: ВАЖНО — relation на user
-    const created = await this.ds.getRepository(Order).save({
-      customer: { id: userId } as User, // ✅ customer_id заполнится, NOT NULL соблюдён
-      orderDate: new Date(),
-      status: 'in_transit',
-      totalAmount: String(dto.totalAmount.toFixed(2)),
+    return { ok: true, orderId: created.id };
+  }
+
+  // -------------------- ИСТОРИЯ ЗАКАЗОВ --------------------
+  async getMyOrders(userId: number) {
+    const orders = await this.ordersRepo.find({
+      where: { customer: { id: userId } },
+      relations: { items: { product: true }, customer: false },
+      order: { orderDate: 'DESC' as const },
     });
 
-    return { ok: true, orderId: created.id };
+    return orders.map((o) => ({
+      orderId: o.id,
+      status: o.status,
+      orderDate: o.orderDate.toISOString(),
+      totalAmount: Number(o.totalAmount),
+      items: o.items.map((it) => ({
+        name: it.product?.name ?? '',
+        quantity: it.quantity,
+        unitPrice: Number(it.unitPrice),
+        lineTotal: Number(it.lineTotal),
+      })),
+    }));
   }
 }

@@ -1,4 +1,3 @@
-// src/orders/orders.controller.ts
 import {
   Body,
   Controller,
@@ -48,5 +47,13 @@ export class OrdersController {
   async checkoutFront(@Req() req: Request, @Body() dto: ClientOrderNotifyDto) {
     const userId = (req.user as JwtPayload).sub;
     return this.orders.notifyFromClient(userId, dto);
+  }
+
+  // 🔹 История заказов текущего пользователя
+  @UseGuards(JwtAuthGuard)
+  @Get('my')
+  async my(@Req() req: Request) {
+    const userId = (req.user as JwtPayload).sub;
+    return this.orders.getMyOrders(userId);
   }
 }
