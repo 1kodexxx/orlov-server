@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { allProducts } from '../../data1/products.data';
+import { allProducts } from '../../data/products.data';
 
 type SeedProduct = {
   id: number;

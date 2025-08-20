@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { testimonials } from '../../data1/reviews.data';
+import { testimonials } from '../../data/reviews.data';
 
 /** Разбиваем "Имя Фамилия" на first/last */
 function splitName(full: string): { first: string; last: string } {

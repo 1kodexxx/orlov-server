@@ -1,7 +1,9 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class BaselineSquashed1723700000000 implements MigrationInterface {
-  name = 'BaselineSquashed1723700000000';
+export class BaselineSquashedWithPhone1723706000000
+  implements MigrationInterface
+{
+  name = 'BaselineSquashedWithPhone1723706000000';
 
   public async up(q: QueryRunner): Promise<void> {
     await q.query(`
@@ -58,6 +60,114 @@ export class BaselineSquashed1723700000000 implements MigrationInterface {
       CREATE INDEX IF NOT EXISTS idx_category_kind       ON category(kind);
       CREATE INDEX IF NOT EXISTS idx_category_name_kind  ON category(name, kind);
 
+      CREATE TABLE IF NOT EXISTS customer (
+        customer_id       SERIAL PRIMARY KEY,
+        first_name        VARCHAR(100) NOT NULL,
+        last_name         VARCHAR(100) NOT NULL,
+        email             VARCHAR(200) NOT NULL UNIQUE,
+        phone             VARCHAR(20),
+        registered_at     timestamptz NOT NULL DEFAULT now(),
+        password_hash     TEXT        NOT NULL DEFAULT '',
+        role              VARCHAR(20) NOT NULL DEFAULT 'customer',
+        avatar_url        VARCHAR(500),
+        avatar_updated_at timestamptz,
+        token_version     INTEGER     NOT NULL DEFAULT 0,
+        headline          VARCHAR(200),
+        organization      VARCHAR(200)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_customer_email ON customer (lower(email));
+
+      ALTER TABLE customer
+        ADD COLUMN IF NOT EXISTS city             VARCHAR(120),
+        ADD COLUMN IF NOT EXISTS country          VARCHAR(120),
+        ADD COLUMN IF NOT EXISTS home_address     TEXT,
+        ADD COLUMN IF NOT EXISTS delivery_address TEXT,
+        ADD COLUMN IF NOT EXISTS birth_date       DATE,
+        ADD COLUMN IF NOT EXISTS pickup_point     VARCHAR(200);
+
+      /* =========================
+         1.a) PHONE: нормализация/дедуп/ограничения/уникальность
+      ========================== */
+
+      /* Нормализуем существующие телефоны в формат +7XXXXXXXXXX */
+      WITH src AS (
+        SELECT
+          customer_id,
+          phone,
+          regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') AS d
+        FROM customer
+      ),
+      normed AS (
+        SELECT
+          customer_id,
+          CASE
+            WHEN d IS NULL OR d = ''            THEN NULL
+            WHEN phone ~ '^\\+7\\d{10}$'        THEN phone
+            WHEN d ~ '^8\\d{10}$'               THEN '+7' || substr(d, 2, 10)
+            WHEN d ~ '^7\\d{10}$'               THEN '+7' || substr(d, 2, 10)
+            WHEN d ~ '^\\d{10}$'                THEN '+7' || d
+            ELSE NULL
+          END AS norm
+        FROM src
+      )
+      UPDATE customer c
+         SET phone = n.norm
+      FROM normed n
+      WHERE n.customer_id = c.customer_id
+        AND (n.norm IS DISTINCT FROM c.phone);
+
+      /* Удалим дубликаты телефонов: у «лишних» строк phone -> NULL (оставим самую раннюю регистрацию) */
+      WITH ranked AS (
+        SELECT
+          customer_id,
+          phone,
+          ROW_NUMBER() OVER (PARTITION BY phone ORDER BY registered_at ASC, customer_id ASC) AS rn
+        FROM customer
+        WHERE phone IS NOT NULL
+      )
+      UPDATE customer c
+         SET phone = NULL
+      FROM ranked r
+      WHERE r.customer_id = c.customer_id
+        AND r.phone IS NOT NULL
+        AND r.rn > 1;
+
+      /* CHECK: либо NULL, либо +7XXXXXXXXXX */
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'customer_phone_format_ck'
+            AND conrelid = 'customer'::regclass
+        ) THEN
+          ALTER TABLE customer
+            ADD CONSTRAINT customer_phone_format_ck
+            CHECK (phone IS NULL OR phone ~ '^\\+7\\d{10}$');
+        END IF;
+      END $$;
+
+      /* UNIQUE индекс только для NOT NULL телефонов */
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_customer_phone_ru
+        ON customer (phone) WHERE phone IS NOT NULL;
+
+      /* =========================
+         1.b) Прочие core таблицы
+      ========================== */
+
+      CREATE TABLE IF NOT EXISTS address (
+        address_id     SERIAL PRIMARY KEY,
+        customer_id    INT NOT NULL REFERENCES customer(customer_id) ON DELETE CASCADE,
+        line1          VARCHAR(200) NOT NULL,
+        line2          VARCHAR(200),
+        city           VARCHAR(100) NOT NULL,
+        postal_code    VARCHAR(20) NOT NULL,
+        country        VARCHAR(100) NOT NULL,
+        is_default     BOOLEAN NOT NULL DEFAULT FALSE
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_address_default_per_customer
+        ON address(customer_id) WHERE is_default;
+
       CREATE TABLE IF NOT EXISTS product (
         product_id     SERIAL PRIMARY KEY,
         sku            VARCHAR(50)  NOT NULL UNIQUE,
@@ -90,44 +200,6 @@ export class BaselineSquashed1723700000000 implements MigrationInterface {
         category_id INT NOT NULL REFERENCES category(category_id) ON DELETE CASCADE,
         PRIMARY KEY (product_id, category_id)
       );
-
-      CREATE TABLE IF NOT EXISTS customer (
-        customer_id       SERIAL PRIMARY KEY,
-        first_name        VARCHAR(100) NOT NULL,
-        last_name         VARCHAR(100) NOT NULL,
-        email             VARCHAR(200) NOT NULL UNIQUE,
-        phone             VARCHAR(20),
-        registered_at     timestamptz NOT NULL DEFAULT now(),
-        password_hash     TEXT        NOT NULL DEFAULT '',
-        role              VARCHAR(20) NOT NULL DEFAULT 'customer',
-        avatar_url        VARCHAR(500),
-        avatar_updated_at timestamptz,
-        token_version     INTEGER     NOT NULL DEFAULT 0,
-        headline          VARCHAR(200),
-        organization      VARCHAR(200)
-      );
-      CREATE UNIQUE INDEX IF NOT EXISTS ux_customer_email ON customer (lower(email));
-
-      ALTER TABLE customer
-        ADD COLUMN IF NOT EXISTS city             VARCHAR(120),
-        ADD COLUMN IF NOT EXISTS country          VARCHAR(120),
-        ADD COLUMN IF NOT EXISTS home_address     TEXT,
-        ADD COLUMN IF NOT EXISTS delivery_address TEXT,
-        ADD COLUMN IF NOT EXISTS birth_date       DATE,
-        ADD COLUMN IF NOT EXISTS pickup_point     VARCHAR(200);
-
-      CREATE TABLE IF NOT EXISTS address (
-        address_id     SERIAL PRIMARY KEY,
-        customer_id    INT NOT NULL REFERENCES customer(customer_id) ON DELETE CASCADE,
-        line1          VARCHAR(200) NOT NULL,
-        line2          VARCHAR(200),
-        city           VARCHAR(100) NOT NULL,
-        postal_code    VARCHAR(20) NOT NULL,
-        country        VARCHAR(100) NOT NULL,
-        is_default     BOOLEAN NOT NULL DEFAULT FALSE
-      );
-      CREATE UNIQUE INDEX IF NOT EXISTS ux_address_default_per_customer
-        ON address(customer_id) WHERE is_default;
 
       CREATE TABLE IF NOT EXISTS orders (
         order_id            SERIAL PRIMARY KEY,
@@ -329,6 +401,11 @@ export class BaselineSquashed1723700000000 implements MigrationInterface {
       CREATE INDEX IF NOT EXISTS idx_product_collection   ON product(collection);
 
       CREATE INDEX IF NOT EXISTS idx_guest_session_last_seen ON guest_session(last_seen);
+
+      /* company_reviews — индексы (для полноты и симметрии с down) */
+      CREATE INDEX IF NOT EXISTS idx_company_reviews_customer   ON company_reviews(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_company_reviews_is_approved ON company_reviews(is_approved);
+      CREATE INDEX IF NOT EXISTS idx_company_reviews_created_at ON company_reviews(created_at);
 
       /* уникальности (единые имена) */
       CREATE UNIQUE INDEX IF NOT EXISTS uq_review_product_customer
@@ -666,6 +743,21 @@ export class BaselineSquashed1723700000000 implements MigrationInterface {
 
       DROP INDEX IF EXISTS idx_guest_session_last_seen;
 
+      /* PHONE: откат индекса и CHECK для customer */
+      DROP INDEX IF EXISTS ux_customer_phone_ru;
+
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'customer_phone_format_ck'
+            AND conrelid = 'customer'::regclass
+        ) THEN
+          ALTER TABLE customer DROP CONSTRAINT customer_phone_format_ck;
+        END IF;
+      END $$;
+
       /* tables (children first) */
       DROP TABLE IF EXISTS cart_item;
       DROP TABLE IF EXISTS cart;
@@ -697,6 +789,7 @@ export class BaselineSquashed1723700000000 implements MigrationInterface {
 
       DROP TABLE IF EXISTS phone_model;
       DROP TABLE IF EXISTS company_reviews;
+
       DROP TABLE IF EXISTS customer;
 
       DROP EXTENSION IF EXISTS pg_trgm;
